@@ -26736,34 +26736,85 @@ function isSubstantiveBullet(text) {
 var MAX_BULLETS_PER_RELEASE = 10;
 var MAX_BULLET_LEN = 300;
 var MAX_SECTION_LEN = 800;
+var ATTRIBUTION = /\s*[([]?\s*(?:(?:by\s+)?@[\w-]+\s+in\s+)?https?:\/\/github\.com\/\S+?\/pull\/\d+\s*[)\]]?\s*$/i;
 function trimLine(line, max) {
-  const clean2 = line.trim().replace(/^[-*+]\s*/, "").replace(/\*\*/g, "");
+  const clean2 = line.trim().replace(/^[-*+]\s*/, "").replace(/\*\*/g, "").replace(ATTRIBUTION, "").trim();
   return clean2.length > max ? clean2.slice(0, max) + "\u2026" : clean2;
+}
+var BREAKING_MARKER = /^\s*(?:💥|🚨|⚠️|breaking\s+changes?|breaking)\s*[:–—-]*\s*/i;
+var HEADING_LINE = /^#{1,4}\s+(.*)$/;
+var MAX_SECTIONS_PER_RELEASE = 5;
+function condenseSection(lines) {
+  const prose = [];
+  let fenced = false;
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) {
+      fenced = !fenced;
+      continue;
+    }
+    if (!fenced)
+      prose.push(line);
+  }
+  const kept = prose.map((l) => l.trim().replace(/^[-*+]\s*/, "").replace(/\*\*/g, "").replace(ATTRIBUTION, "").trim()).filter((l) => l.length > 0 && !CHORE_BULLET.test(l));
+  if (kept.length === 0)
+    return "";
+  const joined = kept.map((l, i) => i === kept.length - 1 || /[.!?:;]$/.test(l) ? l : l + ".").join(" ");
+  return joined.length > MAX_SECTION_LEN ? joined.slice(0, MAX_SECTION_LEN) + "\u2026" : joined;
+}
+function extractBreakingSections(body, tag) {
+  const out = [];
+  const lines = body.split(/\r?\n/);
+  let current = null;
+  let buffer = [];
+  const flush = () => {
+    if (current === null)
+      return;
+    const title = current.replace(BREAKING_MARKER, "").replace(/[\s#]+$/, "").trim();
+    const text = title || condenseSection(buffer);
+    if (text && !CHORE_BULLET.test(text))
+      out.push(`${tag}: ${text}`);
+    current = null;
+    buffer = [];
+  };
+  for (const line of lines) {
+    const heading = line.match(HEADING_LINE);
+    if (!heading) {
+      if (current !== null)
+        buffer.push(line);
+      continue;
+    }
+    flush();
+    if (out.length >= MAX_SECTIONS_PER_RELEASE)
+      return out;
+    const text = heading[1].trim();
+    if (BREAKING_MARKER.test(text))
+      current = text;
+  }
+  flush();
+  return out.slice(0, MAX_SECTIONS_PER_RELEASE);
 }
 function extractBreakingChanges(releases) {
   const breaking = [];
   for (const rel of releases) {
     const body = rel.body ?? "";
     const tag = rel.tag_name ?? rel.name ?? "unknown";
-    if (BREAKING_HEADER.test(body) || /breaking/i.test(rel.name ?? "")) {
-      const m = body.match(/(?:breaking changes?|breaking)[^\n]*\n([\s\S]+?)(?=\n?\s*#{1,4}\s|$)/i);
-      const excerpt = m?.[1]?.trim().slice(0, MAX_SECTION_LEN);
+    if (BREAKING_HEADER.test(body)) {
+      breaking.push(...extractBreakingSections(body, tag));
+    } else if (/breaking/i.test(rel.name ?? "")) {
+      const excerpt = condenseSection(body.split(/\r?\n/));
       if (excerpt)
-        breaking.push(`${tag} (section): ${excerpt}`);
+        breaking.push(`${tag}: ${excerpt}`);
     }
-    const bullets = [];
+    let bullets = 0;
     for (const line of body.split(/\r?\n/)) {
-      if (STRONG_BULLET.test(line)) {
-        const text = trimLine(line, MAX_BULLET_LEN);
-        if (!isSubstantiveBullet(text))
-          continue;
-        bullets.push(text);
-        if (bullets.length >= MAX_BULLETS_PER_RELEASE)
-          break;
-      }
-    }
-    if (bullets.length > 0) {
-      breaking.push(`${tag} (bullets): ${bullets.join(" | ")}`);
+      if (!STRONG_BULLET.test(line))
+        continue;
+      const text = trimLine(line, MAX_BULLET_LEN);
+      if (!isSubstantiveBullet(text))
+        continue;
+      breaking.push(`${tag}: ${text}`);
+      if (++bullets >= MAX_BULLETS_PER_RELEASE)
+        break;
     }
   }
   return breaking;
@@ -26972,6 +27023,7 @@ function renderComment(analyses) {
   const attention = sorted.filter(needsAttention);
   const routine = sorted.filter((a) => !needsAttention(a));
   const body = attention.length === 0 ? allClear(routine) : sorted.length === 1 ? single(sorted[0]) : grouped(attention, routine, sorted.length);
+  while (body.length > 0 && body[body.length - 1] === "") body.pop();
   return [COMMENT_MARKER, ...body, "", FOOTER].join("\n");
 }
 function allClear(routine) {
@@ -27015,7 +27067,8 @@ function single(a) {
       `\`${a.package}\` ${a.fromVersion} \u2192 ${a.toVersion}`,
       "",
       "**What breaks**",
-      ...breaks.map((b) => `- ${b}`),
+      "",
+      ...groupByTag(breaks),
       "",
       "Your tests may not catch these \u2014 they change behaviour, not syntax."
     );
@@ -27027,6 +27080,27 @@ function single(a) {
       "",
       `\`${a.package}\` ${a.fromVersion} \u2192 ${a.toVersion} \u2014 ${a.recommendation ?? "review recommended"}`
     );
+  }
+  return out;
+}
+var TAGGED = /^([^\s:]+):\s+([\s\S]+)$/;
+function groupByTag(entries) {
+  const out = [];
+  let lastTag = null;
+  for (const entry of entries) {
+    const m = entry.match(TAGGED);
+    if (!m) {
+      lastTag = null;
+      out.push(`- ${entry}`);
+      continue;
+    }
+    const [, tag, text] = m;
+    if (tag !== lastTag) {
+      if (out.length > 0) out.push("");
+      out.push(`\`${tag}\``);
+      lastTag = tag;
+    }
+    out.push(`- ${text}`);
   }
   return out;
 }
@@ -27061,7 +27135,10 @@ function grouped(attention, routine, total) {
       out.push(
         `- \`${a.package}\` ${a.fromVersion} \u2192 ${a.toVersion} \u2014 ${a.breakingChanges.length} breaking change${a.breakingChanges.length === 1 ? "" : "s"}${link ? ` \xB7 [migration guide](${link})` : ""}`
       );
-      for (const b of a.breakingChanges.slice(0, 3)) out.push(`  - ${b}`);
+      const shown = a.breakingChanges.slice(0, 3);
+      for (const b of shown) out.push(`  - ${b}`);
+      const hidden = a.breakingChanges.length - shown.length;
+      if (hidden > 0) out.push(`  - \u2026and ${hidden} more`);
     }
     out.push("");
   }
