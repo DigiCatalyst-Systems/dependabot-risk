@@ -56,6 +56,10 @@ export function renderComment(analyses: Analyzed[]): string {
 				? single(sorted[0]!)
 				: grouped(attention, routine, sorted.length);
 
+	// Sections push a trailing blank so the next one is separated; the last of
+	// them would otherwise double up with the footer's own.
+	while (body.length > 0 && body[body.length - 1] === "") body.pop();
+
 	return [COMMENT_MARKER, ...body, "", FOOTER].join("\n");
 }
 
@@ -111,7 +115,8 @@ function single(a: Analyzed): string[] {
 			`\`${a.package}\` ${a.fromVersion} → ${a.toVersion}`,
 			"",
 			"**What breaks**",
-			...breaks.map((b) => `- ${b}`),
+			"",
+			...groupByTag(breaks),
 			"",
 			"Your tests may not catch these — they change behaviour, not syntax."
 		);
@@ -124,6 +129,34 @@ function single(a: Analyzed): string[] {
 			"",
 			`\`${a.package}\` ${a.fromVersion} → ${a.toVersion} — ${a.recommendation ?? "review recommended"}`
 		);
+	}
+	return out;
+}
+
+/**
+ * Entries arrive as `v4.5.0: what broke`. Printing that tag on every line puts
+ * 18 characters of noise before any information, so print it once as a
+ * subheading and list its changes under it.
+ */
+const TAGGED = /^([^\s:]+):\s+([\s\S]+)$/;
+
+function groupByTag(entries: string[]): string[] {
+	const out: string[] = [];
+	let lastTag: string | null = null;
+	for (const entry of entries) {
+		const m = entry.match(TAGGED);
+		if (!m) {
+			lastTag = null;
+			out.push(`- ${entry}`);
+			continue;
+		}
+		const [, tag, text] = m as unknown as [string, string, string];
+		if (tag !== lastTag) {
+			if (out.length > 0) out.push("");
+			out.push(`\`${tag}\``);
+			lastTag = tag;
+		}
+		out.push(`- ${text}`);
 	}
 	return out;
 }
@@ -164,7 +197,12 @@ function grouped(attention: Analyzed[], routine: Analyzed[], total: number): str
 				`- \`${a.package}\` ${a.fromVersion} → ${a.toVersion} — ${a.breakingChanges!.length} breaking change` +
 					`${a.breakingChanges!.length === 1 ? "" : "s"}${link ? ` · [migration guide](${link})` : ""}`
 			);
-			for (const b of a.breakingChanges!.slice(0, 3)) out.push(`  - ${b}`);
+			const shown = a.breakingChanges!.slice(0, 3);
+			for (const b of shown) out.push(`  - ${b}`);
+			const hidden = a.breakingChanges!.length - shown.length;
+			// Claiming five and listing three, silently, is the failure this whole
+			// report exists to avoid.
+			if (hidden > 0) out.push(`  - …and ${hidden} more`);
 		}
 		out.push("");
 	}

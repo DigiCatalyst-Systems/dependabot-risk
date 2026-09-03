@@ -130,3 +130,107 @@ describe("highestLevel", () => {
 		assert.equal(highestLevel([esbuild, failed]), "review");
 	});
 });
+
+describe("breaking changes grouped by release tag", () => {
+	// The analyzer prefixes each entry with the tag it came from. Repeating that
+	// tag on every line puts 18 characters of noise before any information.
+	const zod = {
+		package: "zod",
+		fromVersion: "4.3.6",
+		toVersion: "4.5.2",
+		semverClass: "minor" as const,
+		recommendationLevel: "caution" as const,
+		securityFixes: [],
+		breakingChanges: [
+			"v4.5.0: `z.iso.datetime()` requires seconds",
+			"v4.5.0: String length counts code points",
+			"v4.4.0: Stricter string formats",
+		],
+	};
+
+	it("prints each tag once as a subheading", () => {
+		const out = renderComment([zod]);
+		assert.equal(out.match(/v4\.5\.0/g)?.length, 1, out);
+		assert.match(out, /`v4\.5\.0`\n- `z\.iso\.datetime\(\)` requires seconds\n- String length counts code points/);
+		assert.match(out, /`v4\.4\.0`\n- Stricter string formats/);
+	});
+
+	it("does not repeat the tag inside the bullets", () => {
+		const out = renderComment([zod]);
+		assert.ok(!/- v4\.5\.0:/.test(out), out);
+	});
+
+	it("still counts every change", () => {
+		assert.match(renderComment([zod]), /3 things change/);
+	});
+
+	it("renders an entry with no tag prefix as a plain bullet", () => {
+		const out = renderComment([{ ...zod, breakingChanges: ["Something broke"] }]);
+		assert.match(out, /- Something broke/);
+	});
+});
+
+describe("grouped view truncation", () => {
+	const many = (n: number) =>
+		Array.from({ length: n }, (_, i) => `v2.0.0: breaking change number ${i + 1}`);
+
+	const pkgs = [
+		{
+			package: "zod",
+			fromVersion: "4.3.6",
+			toVersion: "4.5.2",
+			semverClass: "minor" as const,
+			recommendationLevel: "caution" as const,
+			securityFixes: [],
+			breakingChanges: many(5),
+		},
+		{
+			package: "left-pad",
+			fromVersion: "1.0.0",
+			toVersion: "1.0.1",
+			semverClass: "patch" as const,
+			recommendationLevel: "safe" as const,
+			securityFixes: [],
+			breakingChanges: [],
+		},
+	];
+
+	// Claiming five and listing three, with nothing to say the rest exist, is the
+	// same silent withholding the analyzer was just fixed for.
+	it("says how many changes it did not list", () => {
+		const out = renderComment(pkgs);
+		assert.match(out, /5 breaking changes/);
+		assert.match(out, /and 2 more/);
+	});
+
+	it("says nothing extra when everything fits", () => {
+		const out = renderComment([{ ...pkgs[0]!, breakingChanges: many(2) }, pkgs[1]!]);
+		assert.ok(!/and \d+ more/.test(out.split("Merge first")[0] ?? out), out);
+	});
+});
+
+describe("whitespace", () => {
+	it("leaves exactly one blank line before the footer", () => {
+		const out = renderComment([
+			{
+				package: "zod",
+				fromVersion: "4.3.6",
+				toVersion: "4.5.2",
+				semverClass: "minor" as const,
+				recommendationLevel: "caution" as const,
+				securityFixes: [],
+				breakingChanges: ["v4.5.0: it broke"],
+			},
+			{
+				package: "express",
+				fromVersion: "4.18.2",
+				toVersion: "5.0.0",
+				semverClass: "major" as const,
+				recommendationLevel: "caution" as const,
+				securityFixes: [],
+				breakingChanges: ["v5.0.0: also broke"],
+			},
+		]);
+		assert.ok(!/\n\n\n/.test(out), JSON.stringify(out.slice(-200)));
+	});
+});
