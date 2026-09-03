@@ -7,12 +7,21 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
     groups:
-      # Dev tooling churns often and never reaches a consumer, so batch it into
-      # one PR. dep-diff-mcp is a runtime dependency and stays individual: it is
-      # the analysis engine, and its output is what this action publishes.
+      # dist/ is a committed bundle, and Dependabot cannot rebuild it -- every
+      # npm pull request therefore fails the drift check until a maintainer
+      # runs `npm run build` on the branch and commits the result. Grouping
+      # makes that one rebuild per week rather than one per package.
+      #
+      # That manual step is the right shape for a bundled action: a runtime
+      # dependency bump changes what executes on every consumer's runner, so
+      # it deserves a look rather than an automatic merge.
+      runtime:
+        dependency-type: "production"
       dev-dependencies:
         dependency-type: "development"
 
+  # Actions are pinned to commit SHAs with the tag in a trailing comment;
+  # Dependabot updates both. No bundle is involved, so these merge on green.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
