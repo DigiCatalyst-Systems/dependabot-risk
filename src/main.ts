@@ -8,6 +8,7 @@ import {
 	capForComment,
 	highestLevel,
 	renderComment,
+	LOG_BANNER,
 	SUMMARY_HEADING,
 	type Analyzed,
 } from "./render.ts";
@@ -106,6 +107,9 @@ export async function run(): Promise<void> {
 	// The log is the one surface that cannot be blocked by a fork's read-only
 	// token or trimmed by GitHub's comment size limit, so the whole report goes
 	// here unconditionally. Grouped, so it collapses by default.
+	// Printed outside the group so it is visible without expanding anything --
+	// a log full of other jobs should still say which one wrote this.
+	core.info(`\n${LOG_BANNER}\n`);
 	core.startGroup("Risk report");
 	core.info(report);
 	core.endGroup();

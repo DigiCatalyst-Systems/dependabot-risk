@@ -7,6 +7,7 @@ import {
 	capForComment,
 	MAX_COMMENT_CHARS,
 	SUMMARY_HEADING,
+	LOG_BANNER,
 	type Analyzed,
 } from "../src/render.ts";
 
@@ -113,11 +114,10 @@ describe("renderComment — grouped PR", () => {
 		assert.ok(out.indexOf("lodash") < out.indexOf("express"));
 	});
 
-	it("collapses the routine ones instead of giving each a row", () => {
+	it("gives the routine ones a row rather than a footnote", () => {
 		const out = renderComment(group);
-		const routine = out.slice(out.search(/routine/i));
-		assert.match(routine, /esbuild/);
-		assert.match(routine, /tsx/);
+		assert.match(out, /\| ✅ \| `esbuild`/);
+		assert.match(out, /\| ✅ \| `tsx`/);
 	});
 
 	it("keeps a failed analysis visible rather than dropping it", () => {
@@ -178,44 +178,6 @@ describe("breaking changes grouped by release tag", () => {
 	});
 });
 
-describe("grouped view truncation", () => {
-	const many = (n: number) =>
-		Array.from({ length: n }, (_, i) => `v2.0.0: breaking change number ${i + 1}`);
-
-	const pkgs = [
-		{
-			package: "zod",
-			fromVersion: "4.3.6",
-			toVersion: "4.5.2",
-			semverClass: "minor" as const,
-			recommendationLevel: "caution" as const,
-			securityFixes: [],
-			breakingChanges: many(5),
-		},
-		{
-			package: "left-pad",
-			fromVersion: "1.0.0",
-			toVersion: "1.0.1",
-			semverClass: "patch" as const,
-			recommendationLevel: "safe" as const,
-			securityFixes: [],
-			breakingChanges: [],
-		},
-	];
-
-	// Claiming five and listing three, with nothing to say the rest exist, is the
-	// same silent withholding the analyzer was just fixed for.
-	it("says how many changes it did not list", () => {
-		const out = renderComment(pkgs);
-		assert.match(out, /5 breaking changes/);
-		assert.match(out, /and 2 more/);
-	});
-
-	it("says nothing extra when everything fits", () => {
-		const out = renderComment([{ ...pkgs[0]!, breakingChanges: many(2) }, pkgs[1]!]);
-		assert.ok(!/and \d+ more/.test(out.split("Merge first")[0] ?? out), out);
-	});
-});
 
 describe("whitespace", () => {
 	it("leaves exactly one blank line before the footer", () => {
@@ -243,61 +205,6 @@ describe("whitespace", () => {
 	});
 });
 
-describe("hidden changes stay reachable", () => {
-	const many = (n: number) =>
-		Array.from({ length: n }, (_, i) => `v2.0.0: breaking change number ${i + 1}`);
-	const pkgs = (n: number) => [
-		{
-			package: "zod",
-			fromVersion: "4.3.6",
-			toVersion: "4.5.2",
-			semverClass: "minor" as const,
-			recommendationLevel: "caution" as const,
-			securityFixes: [],
-			breakingChanges: many(n),
-		},
-		{
-			package: "express",
-			fromVersion: "4.18.2",
-			toVersion: "5.0.0",
-			semverClass: "major" as const,
-			recommendationLevel: "caution" as const,
-			securityFixes: [],
-			breakingChanges: ["v5.0.0: also broke"],
-		},
-	];
-
-	// "…and 3 more" with nowhere to see them is a tease. The job summary is the
-	// same string, so there was no second surface carrying the rest either.
-	it("puts the remainder in a details expander", () => {
-		const out = renderComment(pkgs(6));
-		assert.match(out, /<details><summary>…and 3 more<\/summary>/);
-		assert.match(out, /breaking change number 6/);
-	});
-
-	it("leaves a blank line after summary so the markdown inside renders", () => {
-		const out = renderComment(pkgs(6));
-		assert.match(out, /<summary>…and 3 more<\/summary>\n\n/);
-	});
-
-	it("closes the expander", () => {
-		const out = renderComment(pkgs(6));
-		assert.equal((out.match(/<details>/g) ?? []).length, (out.match(/<\/details>/g) ?? []).length);
-	});
-
-	it("adds no expander when everything already fits", () => {
-		const out = renderComment(pkgs(3));
-		assert.ok(!/<details>/.test(out), out);
-		assert.match(out, /breaking change number 3/);
-	});
-
-	it("never drops a change", () => {
-		const out = renderComment(pkgs(9));
-		for (let i = 1; i <= 9; i++) {
-			assert.match(out, new RegExp(`breaking change number ${i}\\b`), `missing change ${i}`);
-		}
-	});
-});
 
 describe("attribution", () => {
 	const one = [
@@ -344,5 +251,132 @@ describe("capForComment", () => {
 		const out = capForComment(body);
 		assert.ok(out.length <= MAX_COMMENT_CHARS, `still ${out.length}`);
 		assert.match(out, /job summary/i);
+	});
+});
+
+describe("grouped table", () => {
+	const mk = (over: Record<string, unknown>) => ({
+		package: "p", fromVersion: "1", toVersion: "2",
+		semverClass: "major", recommendationLevel: "caution",
+		securityFixes: [], breakingChanges: [], migrationLinks: [],
+		...over,
+	}) as never;
+
+	const four = [
+		mk({
+			package: "lodash", fromVersion: "4.17.20", toVersion: "4.17.21",
+			recommendationLevel: "security",
+			securityFixes: [
+				{ id: "GHSA-1", summary: "Command Injection in lodash", severity: "HIGH" },
+				{ id: "GHSA-2", summary: "ReDoS in lodash", severity: "MODERATE" },
+			],
+		}),
+		mk({
+			package: "actions/setup-node", fromVersion: "4", toVersion: "7",
+			breakingChanges: [
+				"v7.0.0: Migrate to ESM and upgrade dependencies",
+				"v5.0.0: Upgrade action to use node24. Runner must be on version v2.327.1 or later.",
+			],
+		}),
+		mk({ package: "typescript", fromVersion: "6.0.3", toVersion: "7.0.2",
+			recommendationLevel: "review", recommendation: "REVIEW: Major version bump." }),
+		mk({ package: "esbuild", fromVersion: "0.28.1", toVersion: "0.28.2",
+			recommendationLevel: "safe", semverClass: "patch" }),
+	];
+
+	it("renders a markdown table with a header", () => {
+		const out = renderComment(four);
+		assert.match(out, /\|\s*\|\s*Package\s*\|\s*Change\s*\|\s*What to know\s*\|/);
+		assert.match(out, /\|---\|/);
+	});
+
+	it("marks security, breaking, review and safe distinctly", () => {
+		const out = renderComment(four);
+		assert.match(out, /\| 🚨 \| `lodash` \| 4\.17\.20 → 4\.17\.21 \|/);
+		assert.match(out, /\| 🚫 \| `actions\/setup-node` \| 4 → 7 \|/);
+		assert.match(out, /\| ⚠️ \| `typescript` \|/);
+		assert.match(out, /\| ✅ \| `esbuild` \|/);
+	});
+
+	it("gives every package a row, routine ones included", () => {
+		const out = renderComment(four);
+		for (const p of ["lodash", "actions/setup-node", "typescript", "esbuild"]) {
+			assert.match(out, new RegExp(`\\| \`${p.replace("/", "\\/")}\``), `no row for ${p}`);
+		}
+	});
+
+	it("puts the worst advisory and the remaining count in What to know", () => {
+		const out = renderComment(four);
+		assert.match(out, /Command Injection.*fix soon.*1 more/);
+	});
+
+	// A bare count says how much to read, not what it is. The requirement change
+	// is the part that decides whether a workflow survives the merge.
+	it("names the most consequential change beside the count", () => {
+		const out = renderComment(four);
+		assert.match(out, /2 breaking changes.*node24/);
+	});
+
+	it("says plainly when nothing was found", () => {
+		assert.match(renderComment(four), /\| ✅ \| `esbuild` \| 0\.28\.1 → 0\.28\.2 \| nothing found \|/);
+	});
+
+	it("escapes a pipe so it cannot break the table", () => {
+		const out = renderComment([
+			four[0]!,
+			mk({ package: "weird", breakingChanges: ["v2.0.0: a | b was removed"] }),
+		]);
+		assert.ok(!/\| a \| b was removed/.test(out), "unescaped pipe leaked into a cell");
+	});
+
+	it("puts the full change list in a details block under the table", () => {
+		const out = renderComment(four);
+		assert.match(out, /<details><summary>.*actions\/setup-node.*<\/summary>/);
+		assert.match(out, /`v7\.0\.0`\n- Migrate to ESM and upgrade dependencies/);
+		assert.match(out, /`v5\.0\.0`\n- Upgrade action to use node24/);
+	});
+
+	it("no longer marks individual change lines", () => {
+		const out = renderComment(four);
+		assert.ok(!/- (🔴|🟠|🟡) v\d/.test(out), out);
+	});
+});
+
+describe("per-package details block", () => {
+	const withChanges = (n: number) => [
+		{
+			package: "zod", fromVersion: "4.3.6", toVersion: "4.5.2",
+			semverClass: "minor" as const, recommendationLevel: "caution" as const,
+			securityFixes: [], migrationLinks: [],
+			breakingChanges: Array.from({ length: n }, (_, i) => `v2.0.0: change number ${i + 1}`),
+		},
+		{
+			package: "esbuild", fromVersion: "0.28.1", toVersion: "0.28.2",
+			semverClass: "patch" as const, recommendationLevel: "safe" as const,
+			securityFixes: [], migrationLinks: [], breakingChanges: [],
+		},
+	];
+
+	// The table carries the verdict; the details block carries everything, so
+	// nothing is capped and nothing is hidden behind a count.
+	it("lists every change, however many", () => {
+		const out = renderComment(withChanges(12));
+		for (let i = 1; i <= 12; i++) {
+			assert.match(out, new RegExp(`change number ${i}\\b`), `missing change ${i}`);
+		}
+	});
+
+	it("leaves a blank line after summary so the markdown inside renders", () => {
+		assert.match(renderComment(withChanges(4)), /<\/summary>\n\n/);
+	});
+
+	it("closes every expander it opens", () => {
+		const out = renderComment(withChanges(4));
+		assert.equal((out.match(/<details>/g) ?? []).length, (out.match(/<\/details>/g) ?? []).length);
+	});
+
+	it("adds no block for a package with nothing to expand", () => {
+		const out = renderComment(withChanges(4));
+		assert.ok(!/<b>esbuild<\/b>/.test(out), out);
 	});
 });

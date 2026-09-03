@@ -20457,7 +20457,7 @@ var require_truncate = __commonJS({
     var parse3 = require_parse2();
     var constants3 = require_constants6();
     var SemVer = require_semver();
-    var truncate = (version, truncation, options) => {
+    var truncate2 = (version, truncation, options) => {
       if (!constants3.RELEASE_TYPES.includes(truncation)) {
         return null;
       }
@@ -20487,7 +20487,7 @@ var require_truncate = __commonJS({
     var isPrerelease = (type) => {
       return type.startsWith("pre");
     };
-    module.exports = truncate;
+    module.exports = truncate2;
   }
 });
 
@@ -21533,7 +21533,7 @@ var require_semver2 = __commonJS({
     var lte = require_lte();
     var cmp = require_cmp();
     var coerce = require_coerce();
-    var truncate = require_truncate();
+    var truncate2 = require_truncate();
     var Comparator = require_comparator();
     var Range = require_range();
     var satisfies = require_satisfies();
@@ -21572,7 +21572,7 @@ var require_semver2 = __commonJS({
       lte,
       cmp,
       coerce,
-      truncate,
+      truncate: truncate2,
       Comparator,
       Range,
       satisfies,
@@ -21942,11 +21942,11 @@ var Summary = class {
    */
   addTable(rows) {
     const tableBody = rows.map((row) => {
-      const cells = row.map((cell) => {
-        if (typeof cell === "string") {
-          return this.wrap("td", cell);
+      const cells = row.map((cell2) => {
+        if (typeof cell2 === "string") {
+          return this.wrap("td", cell2);
         }
-        const { header, data, colspan, rowspan } = cell;
+        const { header, data, colspan, rowspan } = cell2;
         const tag = header ? "th" : "td";
         const attrs = Object.assign(Object.assign({}, colspan && { colspan }), rowspan && { rowspan });
         return this.wrap(tag, data, attrs);
@@ -27059,6 +27059,49 @@ function trimLine(line, max) {
 var BREAKING_MARKER = /^\s*(?:💥|🚨|⚠️|breaking\s+changes?|breaking)\s*[:–—-]*\s*/i;
 var HEADING_LINE = /^#{1,4}\s+(.*)$/;
 var MAX_SECTIONS_PER_RELEASE = 5;
+var BULLET_LINE = /^\s*[-*+]\s+/;
+var MAX_SECTION_ENTRY_LEN = 240;
+function splitSectionEntries(lines) {
+  const prose = stripFences(lines);
+  if (!prose.some((l) => BULLET_LINE.test(l))) {
+    const single2 = condenseLines(prose);
+    return single2 ? [single2] : [];
+  }
+  const chunks = [];
+  for (const line of prose) {
+    if (BULLET_LINE.test(line))
+      chunks.push([line]);
+    else if (chunks.length > 0)
+      chunks[chunks.length - 1].push(line);
+  }
+  const out = [];
+  for (const chunk of chunks) {
+    const text = condenseLines(chunk, MAX_SECTION_ENTRY_LEN);
+    if (text && !CHORE_BULLET.test(text))
+      out.push(text);
+  }
+  return out;
+}
+function stripFences(lines) {
+  const out = [];
+  let fenced = false;
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) {
+      fenced = !fenced;
+      continue;
+    }
+    if (!fenced)
+      out.push(line);
+  }
+  return out;
+}
+function condenseLines(lines, max = MAX_SECTION_LEN) {
+  const kept = lines.map((l) => l.trim().replace(/^[-*+]\s*/, "").replace(/\*\*/g, "").replace(ATTRIBUTION, "").trim()).filter((l) => l.length > 0 && !CHORE_BULLET.test(l));
+  if (kept.length === 0)
+    return "";
+  const joined = kept.map((l, i) => i === kept.length - 1 || /[.!?:;]$/.test(l) ? l : l + ".").join(" ");
+  return joined.length > max ? joined.slice(0, max) + "\u2026" : joined;
+}
 function condenseSection(lines) {
   const prose = [];
   let fenced = false;
@@ -27085,9 +27128,13 @@ function extractBreakingSections(body, tag) {
     if (current === null)
       return;
     const title = current.replace(BREAKING_MARKER, "").replace(/[\s#]+$/, "").trim();
-    const text = title || condenseSection(buffer);
-    if (text && !CHORE_BULLET.test(text))
-      out.push(`${tag}: ${text}`);
+    if (title) {
+      if (!CHORE_BULLET.test(title))
+        out.push(`${tag}: ${title}`);
+    } else {
+      for (const text of splitSectionEntries(buffer))
+        out.push(`${tag}: ${text}`);
+    }
     current = null;
     buffer = [];
   };
@@ -27132,7 +27179,7 @@ function extractBreakingChanges(releases) {
         break;
     }
   }
-  return breaking;
+  return [...new Set(breaking)];
 }
 var MAX_EXCERPT_RELEASES = 5;
 var MAX_EXCERPT_LEN = 500;
@@ -27330,13 +27377,18 @@ var URGENCY = {
 };
 var FOOTER = "<sub>[Dependabot Risk Report](https://github.com/marketplace/actions/dependabot-risk-report) by DigiCatalyst Systems \xB7 ranked by what the release notes and advisories actually say, not by semver \xB7 powered by [dep-diff-mcp](https://github.com/DigiCatalyst-Systems/dep-diff-mcp).</sub>";
 var SUMMARY_HEADING = "## \u{1F6E1}\uFE0F Dependabot Risk Report\n\n<sub>by DigiCatalyst Systems \xB7 [install it](https://github.com/marketplace/actions/dependabot-risk-report)</sub>";
+var LOG_BANNER = [
+  "\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557",
+  "\u2551   D E P E N D A B O T   R I S K   R E P O R T                      \u2551",
+  "\u2551   by DigiCatalyst Systems                                          \u2551",
+  "\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255D"
+].join("\n");
 var MAX_COMMENT_CHARS = 6e4;
 function capForComment(body) {
   if (body.length <= MAX_COMMENT_CHARS) return body;
   const notice = "\n\n<sub>Report truncated \u2014 it exceeded GitHub's comment size limit. The full report is in the job summary.</sub>";
   return body.slice(0, MAX_COMMENT_CHARS - notice.length) + notice;
 }
-var GROUPED_VISIBLE = 3;
 function highestLevel(analyses) {
   if (analyses.length === 0) return "safe";
   return analyses.reduce((worst, a) => rank(a) < rank(worst) ? a : worst).recommendationLevel;
@@ -27430,65 +27482,68 @@ function groupByTag(entries) {
 function grouped(attention, routine, total) {
   const out = [
     `### ${attention.length} of ${total} update${total === 1 ? "" : "s"} need${attention.length === 1 ? "s" : ""} a look`,
-    ""
+    "",
+    "|  | Package | Change | What to know |",
+    "|---|---|---|---|"
   ];
-  const security = attention.filter((a) => (a.securityFixes?.length ?? 0) > 0);
-  const breaking = attention.filter(
-    (a) => (a.breakingChanges?.length ?? 0) > 0 && (a.securityFixes?.length ?? 0) === 0
-  );
-  const unclear = attention.filter((a) => a.error);
-  const other = attention.filter(
-    (a) => !security.includes(a) && !breaking.includes(a) && !unclear.includes(a)
-  );
-  if (security.length > 0) {
-    out.push("**\u{1F534} Merge first**");
-    for (const a of security) {
-      const worst = (a.securityFixes ?? [])[0];
-      const extra = (a.securityFixes ?? []).length - 1;
-      out.push(
-        `- \`${a.package}\` ${a.fromVersion} \u2192 ${a.toVersion} \u2014 closes **${cleanSummary(worst, a.package)}** (${urgency(worst.severity)})${extra > 0 ? ` and ${extra} more` : ""}`
-      );
-    }
-    out.push("");
+  const all = [...attention, ...routine];
+  for (const a of all) {
+    const change = a.error ? "\u2014" : `${a.fromVersion} \u2192 ${a.toVersion}`;
+    out.push(`| ${packageMarker(a)} | \`${a.package}\` | ${change} | ${cell(whatToKnow(a))} |`);
   }
-  if (breaking.length > 0) {
-    out.push("**\u26A0\uFE0F Read first**");
-    for (const a of breaking) {
-      const link = (a.migrationLinks ?? [])[0];
-      out.push(
-        `- \`${a.package}\` ${a.fromVersion} \u2192 ${a.toVersion} \u2014 ${a.breakingChanges.length} breaking change${a.breakingChanges.length === 1 ? "" : "s"}${link ? ` \xB7 [migration guide](${link})` : ""}`
-      );
-      const shown = a.breakingChanges.slice(0, GROUPED_VISIBLE);
-      for (const b of shown) out.push(`  - ${b}`);
-      const rest = a.breakingChanges.slice(GROUPED_VISIBLE);
-      if (rest.length > 0) {
-        out.push(`  <details><summary>\u2026and ${rest.length} more</summary>`, "");
-        for (const b of rest) out.push(`  - ${b}`);
-        out.push("  </details>");
-      }
-    }
-    out.push("");
-  }
-  for (const [heading, group] of [
-    ["**\u{1F7E1} Worth a look**", other],
-    ["**\u{1F7E1} Could not check**", unclear]
-  ]) {
-    if (group.length === 0) continue;
-    out.push(heading);
-    for (const a of group) {
-      out.push(
-        a.error ? `- \`${a.package}\` \u2014 ${a.error}` : `- \`${a.package}\` ${a.fromVersion} \u2192 ${a.toVersion} \u2014 ${a.recommendation ?? "review recommended"}`
-      );
-    }
-    out.push("");
-  }
-  if (routine.length > 0) {
+  for (const a of all) {
+    const breaks = a.breakingChanges ?? [];
+    if (breaks.length === 0) continue;
     out.push(
-      "**\u2705 Routine** \u2014 no advisories, no breaking changes",
-      routine.map((a) => `\`${a.package}\``).join(", ")
+      "",
+      `<details><summary><b>${a.package}</b> \u2014 what breaks</summary>`,
+      "",
+      ...groupByTag(breaks)
     );
+    for (const link of a.migrationLinks ?? []) out.push("", `[Migration guide \u2192](${link})`);
+    out.push("", "</details>");
   }
   return out;
+}
+function packageMarker(a) {
+  if ((a.securityFixes?.length ?? 0) > 0) return "\u{1F6A8}";
+  if ((a.breakingChanges?.length ?? 0) > 0) return "\u{1F6AB}";
+  if (a.error || needsAttention(a)) return "\u26A0\uFE0F";
+  return "\u2705";
+}
+function cell(text) {
+  return text.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+}
+var MAX_CELL_LEN = 90;
+function whatToKnow(a) {
+  if (a.error) return `could not check \u2014 ${a.error}`;
+  const fixes = a.securityFixes ?? [];
+  if (fixes.length > 0) {
+    const worst = fixes[0];
+    const more = fixes.length - 1;
+    const text = `closes ${cleanSummary(worst, a.package)} (${urgency(worst.severity)})` + (more > 0 ? ` \xB7 ${more} more` : "");
+    return truncate(text);
+  }
+  const breaks = a.breakingChanges ?? [];
+  if (breaks.length > 0) {
+    const count = `${breaks.length} breaking change${breaks.length === 1 ? "" : "s"}`;
+    const headline = highlightOf(breaks);
+    return truncate(headline ? `${count} \xB7 ${headline}` : count);
+  }
+  if (needsAttention(a)) return truncate(a.recommendation ?? "review recommended");
+  return "nothing found";
+}
+function highlightOf(changes) {
+  const requirement = changes.find((c) => REQUIREMENT.test(c));
+  const pick = requirement ?? changes[0];
+  return pick.replace(/^\S+:\s*/, "").replace(/\s*\[[^\]]*\]\([^)]*\)\s*$/, "").trim();
+}
+var REQUIREMENT = /\b(?:now\s+requires?|minimum|must\s+be\s+on|or\s+later|upgrade\s+\S+\s+to\s+use|requires?\s+(?:node|python|runner))\b/i;
+function truncate(text) {
+  if (text.length <= MAX_CELL_LEN) return text;
+  const cut = text.slice(0, MAX_CELL_LEN);
+  const space = cut.lastIndexOf(" ");
+  return (space > MAX_CELL_LEN * 0.6 ? cut.slice(0, space) : cut).trimEnd() + "\u2026";
 }
 function cleanSummary(f, pkg) {
   const escaped = pkg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -27575,6 +27630,9 @@ async function run() {
   await summary.addRaw(`${SUMMARY_HEADING}
 
 ${report}`).write();
+  info(`
+${LOG_BANNER}
+`);
   startGroup("Risk report");
   info(report);
   endGroup();

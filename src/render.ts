@@ -51,6 +51,17 @@ export const SUMMARY_HEADING =
 	"<sub>by DigiCatalyst Systems · " +
 	"[install it](https://github.com/marketplace/actions/dependabot-risk-report)</sub>";
 
+/**
+ * Printed unconditionally to the run log, outside the collapsed group, so the
+ * report is attributable at a glance in a log full of other jobs.
+ */
+export const LOG_BANNER = [
+	"╔════════════════════════════════════════════════════════════════════╗",
+	"║   D E P E N D A B O T   R I S K   R E P O R T                      ║",
+	"║   by DigiCatalyst Systems                                          ║",
+	"╚════════════════════════════════════════════════════════════════════╝",
+].join("\n");
+
 /** GitHub rejects a comment body over 65536 characters. Leave room for the notice. */
 export const MAX_COMMENT_CHARS = 60000;
 
@@ -196,79 +207,104 @@ function grouped(attention: Analyzed[], routine: Analyzed[], total: number): str
 	const out = [
 		`### ${attention.length} of ${total} update${total === 1 ? "" : "s"} need${attention.length === 1 ? "s" : ""} a look`,
 		"",
+		"|  | Package | Change | What to know |",
+		"|---|---|---|---|",
 	];
 
-	const security = attention.filter((a) => (a.securityFixes?.length ?? 0) > 0);
-	const breaking = attention.filter(
-		(a) => (a.breakingChanges?.length ?? 0) > 0 && (a.securityFixes?.length ?? 0) === 0
-	);
-	const unclear = attention.filter((a) => a.error);
-	const other = attention.filter(
-		(a) => !security.includes(a) && !breaking.includes(a) && !unclear.includes(a)
-	);
-
-	if (security.length > 0) {
-		out.push("**🔴 Merge first**");
-		for (const a of security) {
-			const worst = (a.securityFixes ?? [])[0]!;
-			const extra = (a.securityFixes ?? []).length - 1;
-			out.push(
-				`- \`${a.package}\` ${a.fromVersion} → ${a.toVersion} — closes **${cleanSummary(worst, a.package)}** ` +
-					`(${urgency(worst.severity)})${extra > 0 ? ` and ${extra} more` : ""}`
-			);
-		}
-		out.push("");
+	// Every package gets a row, routine ones included. A comma-separated
+	// afterthought reads as "and some others"; a row reads as "I checked this".
+	const all = [...attention, ...routine];
+	for (const a of all) {
+		const change = a.error ? "—" : `${a.fromVersion} → ${a.toVersion}`;
+		out.push(`| ${packageMarker(a)} | \`${a.package}\` | ${change} | ${cell(whatToKnow(a))} |`);
 	}
 
-	if (breaking.length > 0) {
-		out.push("**⚠️ Read first**");
-		for (const a of breaking) {
-			const link = (a.migrationLinks ?? [])[0];
-			out.push(
-				`- \`${a.package}\` ${a.fromVersion} → ${a.toVersion} — ${a.breakingChanges!.length} breaking change` +
-					`${a.breakingChanges!.length === 1 ? "" : "s"}${link ? ` · [migration guide](${link})` : ""}`
-			);
-			// Claiming six and listing three is the failure this report exists to
-			// avoid, and "…and 3 more" with nowhere to see them is only half a fix.
-			// The cap keeps the grouped view scannable; the expander keeps every
-			// change reachable. <details> renders in a pull request comment and in
-			// a job summary alike -- the blank line after </summary> is what lets
-			// the markdown inside it render.
-			const shown = a.breakingChanges!.slice(0, GROUPED_VISIBLE);
-			for (const b of shown) out.push(`  - ${b}`);
-			const rest = a.breakingChanges!.slice(GROUPED_VISIBLE);
-			if (rest.length > 0) {
-				out.push(`  <details><summary>…and ${rest.length} more</summary>`, "");
-				for (const b of rest) out.push(`  - ${b}`);
-				out.push("  </details>");
-			}
-		}
-		out.push("");
-	}
-
-	for (const [heading, group] of [
-		["**🟡 Worth a look**", other],
-		["**🟡 Could not check**", unclear],
-	] as const) {
-		if (group.length === 0) continue;
-		out.push(heading);
-		for (const a of group) {
-			out.push(
-				a.error
-					? `- \`${a.package}\` — ${a.error}`
-					: `- \`${a.package}\` ${a.fromVersion} → ${a.toVersion} — ${a.recommendation ?? "review recommended"}`
-			);
-		}
-		out.push("");
-	}
-
-	if (routine.length > 0) {
+	for (const a of all) {
+		const breaks = a.breakingChanges ?? [];
+		if (breaks.length === 0) continue;
 		out.push(
-			"**✅ Routine** — no advisories, no breaking changes",
-			routine.map((a) => `\`${a.package}\``).join(", ")
+			"",
+			`<details><summary><b>${a.package}</b> — what breaks</summary>`,
+			"",
+			...groupByTag(breaks)
 		);
+		for (const link of a.migrationLinks ?? []) out.push("", `[Migration guide →](${link})`);
+		out.push("", "</details>");
 	}
+
 	return out;
+}
+
+/**
+ * One marker per package rather than per line. Security is deliberately its own
+ * state: "merge this, it closes a hole" is the opposite instruction from "read
+ * this before merging", and folding the two together inverts the advice on the
+ * most valuable thing the report finds.
+ */
+function packageMarker(a: Analyzed): string {
+	if ((a.securityFixes?.length ?? 0) > 0) return "🚨";
+	if ((a.breakingChanges?.length ?? 0) > 0) return "🚫";
+	if (a.error || needsAttention(a)) return "⚠️";
+	return "✅";
+}
+
+/** A pipe in release-note text would otherwise split the cell into two. */
+function cell(text: string): string {
+	return text.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+}
+
+const MAX_CELL_LEN = 90;
+
+/**
+ * A bare count tells you how much there is to read, not what it is. Lead with the
+ * single most consequential item, because that is what decides whether the merge
+ * is safe -- for a security row the worst advisory, for a breaking row the change
+ * most likely to break a build outright.
+ */
+function whatToKnow(a: Analyzed): string {
+	if (a.error) return `could not check — ${a.error}`;
+
+	const fixes = a.securityFixes ?? [];
+	if (fixes.length > 0) {
+		const worst = fixes[0]!;
+		const more = fixes.length - 1;
+		const text =
+			`closes ${cleanSummary(worst, a.package)} (${urgency(worst.severity)})` +
+			(more > 0 ? ` · ${more} more` : "");
+		return truncate(text);
+	}
+
+	const breaks = a.breakingChanges ?? [];
+	if (breaks.length > 0) {
+		const count = `${breaks.length} breaking change${breaks.length === 1 ? "" : "s"}`;
+		const headline = highlightOf(breaks);
+		return truncate(headline ? `${count} · ${headline}` : count);
+	}
+
+	if (needsAttention(a)) return truncate(a.recommendation ?? "review recommended");
+	return "nothing found";
+}
+
+/**
+ * The change worth naming in the summary cell. A new minimum requirement breaks a
+ * workflow whether or not you use the feature, so it outranks everything else;
+ * failing that, the first change stands in.
+ */
+function highlightOf(changes: string[]): string {
+	const requirement = changes.find((c) => REQUIREMENT.test(c));
+	const pick = requirement ?? changes[0]!;
+	return pick.replace(/^\S+:\s*/, "").replace(/\s*\[[^\]]*\]\([^)]*\)\s*$/, "").trim();
+}
+
+const REQUIREMENT =
+	/\b(?:now\s+requires?|minimum|must\s+be\s+on|or\s+later|upgrade\s+\S+\s+to\s+use|requires?\s+(?:node|python|runner))\b/i;
+
+function truncate(text: string): string {
+	if (text.length <= MAX_CELL_LEN) return text;
+	const cut = text.slice(0, MAX_CELL_LEN);
+	// Break on a word so a cell does not end mid-syllable ("v2.327.1 or l…").
+	const space = cut.lastIndexOf(" ");
+	return (space > MAX_CELL_LEN * 0.6 ? cut.slice(0, space) : cut).trimEnd() + "…";
 }
 
 /** "Command Injection in lodash" reads badly next to a lodash label. */
