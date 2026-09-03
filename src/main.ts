@@ -1,7 +1,8 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
 import { analyzePackageChange } from "@digicatalyst/dep-diff-mcp/dist/analyzer.js";
-import { parseDependabotPr } from "./dependabot.ts";
+import { isDependencyBot, parseDependabotPr, type Ecosystem } from "./dependabot.ts";
+import { parseRenovatePr } from "./renovate.ts";
 import { COMMENT_MARKER, highestLevel, renderComment, type Analyzed } from "./render.ts";
 
 const ORDER = ["security", "caution", "review", "likely-safe", "safe"];
@@ -23,7 +24,7 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 
 export async function run(): Promise<void> {
 	const token = core.getInput("github-token", { required: true });
-	const ecosystem = (core.getInput("ecosystem") || "npm") as "npm" | "pypi";
+	const ecosystem = (core.getInput("ecosystem") || "npm") as Ecosystem;
 	const failOn = (core.getInput("fail-on") || "none").trim();
 	const shouldComment = core.getBooleanInput("comment");
 
@@ -33,19 +34,43 @@ export async function run(): Promise<void> {
 		return;
 	}
 
-	const changes = parseDependabotPr(pr.title ?? "", (pr.body as string | null) ?? undefined);
+	const body = (pr.body as string | null) ?? undefined;
+	// Dependabot states the change in prose; Renovate only in a table. Neither
+	// format matches the other, so a miss on one is not a miss on the other.
+	const changes = [
+		...parseDependabotPr(pr.title ?? "", body),
+		...parseRenovatePr(body),
+	].filter((c, i, all) => all.findIndex((o) => o.name === c.name) === i);
 	if (changes.length === 0) {
-		core.info("No dependency bumps found in this pull request.");
+		// Reading a pull request body is reading a presentation format, not an API.
+		// When the author was a dependency bot there were changes to find, so failing
+		// quietly here would read as "the action is broken" — say so instead.
+		if (isDependencyBot(pr.user?.login)) {
+			core.warning(
+				`Could not read any version changes from this ${pr.user?.login} pull request. ` +
+					"The body format may have changed — please open an issue at " +
+					"https://github.com/DigiCatalyst-Systems/dependabot-risk/issues with a link to this PR."
+			);
+		} else {
+			core.info("No dependency bumps found in this pull request.");
+		}
 		core.setOutput("highest-level", "safe");
 		core.setOutput("security-count", "0");
 		return;
 	}
-	core.info(`Analyzing ${changes.length} package change(s) in ${ecosystem}.`);
+
+	const actionCount = changes.filter((c) => c.ecosystem === "github-actions").length;
+	core.info(
+		`Analyzing ${changes.length} package change(s): ` +
+			`${changes.length - actionCount} in ${ecosystem}, ${actionCount} github-actions.`
+	);
 
 	const analyses: Analyzed[] = await mapLimit(changes, CONCURRENCY, async (c) => {
 		try {
 			return (await analyzePackageChange(
-				ecosystem,
+				// A slashed, unscoped name is a repository coordinate, so the name
+				// itself settles the ecosystem regardless of the configured default.
+				c.ecosystem ?? ecosystem,
 				c.name,
 				c.fromVersion,
 				c.toVersion,
@@ -62,16 +87,16 @@ export async function run(): Promise<void> {
 		}
 	});
 
-	const body = renderComment(analyses);
+	const report = renderComment(analyses);
 	const level = highestLevel(analyses);
 	const securityCount = analyses.reduce((n, a) => n + (a.securityFixes?.length ?? 0), 0);
 
 	core.setOutput("highest-level", level);
 	core.setOutput("security-count", String(securityCount));
-	core.setOutput("summary", body);
-	await core.summary.addRaw(body).write();
+	core.setOutput("summary", report);
+	await core.summary.addRaw(report).write();
 
-	if (shouldComment) await upsertComment(token, pr.number, body);
+	if (shouldComment) await upsertComment(token, pr.number, report);
 
 	if (failOn !== "none") {
 		const threshold = ORDER.indexOf(failOn);

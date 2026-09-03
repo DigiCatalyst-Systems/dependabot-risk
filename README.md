@@ -87,6 +87,14 @@ Dependabot PR itself and uses the job's own `GITHUB_TOKEN`.
           fail-on: caution
 ```
 
+### GitHub Actions bumps
+
+No configuration needed — they are detected from the name:
+
+```yaml
+      - uses: DigiCatalyst-Systems/dependabot-risk@v1
+```
+
 ### Python projects
 
 ```yaml
@@ -100,7 +108,7 @@ Dependabot PR itself and uses the job's own `GITHUB_TOKEN`.
 | Input | Default | Description |
 |---|---|---|
 | `github-token` | `${{ github.token }}` | Reads release notes and posts the comment. |
-| `ecosystem` | `npm` | `npm` or `pypi`. |
+| `ecosystem` | `npm` | Default for names that do not settle it themselves: `npm` or `pypi`. GitHub Actions bumps are detected from the name. |
 | `comment` | `true` | Post and update a comment on the PR. |
 | `fail-on` | `none` | Fail at this level or worse: `security`, `caution`, `review`, `likely-safe`, `safe`, `none`. |
 
@@ -118,12 +126,30 @@ Dependabot PR itself and uses the job's own `GITHUB_TOKEN`.
 - **Breaking changes** — extracted from GitHub release notes between the two versions, with prerelease tags and CI/docs churn filtered out.
 - **Migration links** — upgrade guide URLs found in those release notes.
 
+### Supported bots and ecosystems
+
+Both **Dependabot** and **Renovate** are read. Dependabot states each change in prose
+(`Bumps [zod](...) from 4.3.6 to 4.5.2`); Renovate states it only in its body table
+(`` | [zod](...) | `4.3.6` -> `4.5.2` | ``), including the range operators
+(`^`, `==`, `>=`), which are stripped.
+
+npm, PyPI, and **GitHub Actions** are analyzed. An `actions/checkout` bump needs no
+configuration: a slashed, unscoped name is a repository coordinate, so it is detected
+and routed regardless of the `ecosystem` input. This matters more than it sounds —
+`actions/*` bumps are among the most common PRs Dependabot opens, and they carry real
+advisories: `tj-actions/changed-files` 45.0.7 → 46.0.1 closes a HIGH-severity secret
+disclosure that the PR body says nothing about.
+
+If a dependency bot opened the PR and no version change could be read from it, the
+action logs a warning rather than passing silently. A quiet no-op is indistinguishable
+from a broken install.
+
 The report is always written to the job summary, so it survives even when a fork PR's
 token cannot post comments.
 
 ## How it works
 
-Dependabot PR titles and bodies already state every version change, so this action
+Dependabot and Renovate PR bodies already state every version change, so this action
 does not need to parse lockfiles. It reads them directly, then hands each change to
 [`dep-diff`](https://github.com/DigiCatalyst-Systems/dep-diff-mcp) — the same analysis
 engine available as an MCP server for interactive use in Claude Code, Cursor, and

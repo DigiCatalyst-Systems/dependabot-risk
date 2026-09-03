@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseDependabotPr } from "../src/dependabot.ts";
+import { parseDependabotPr, isDependencyBot } from "../src/dependabot.ts";
 
 // Fixtures below are real Dependabot output from this repository's own PRs,
 // trimmed to the lines the parser reads.
@@ -41,13 +41,40 @@ describe("parseDependabotPr", () => {
 		]);
 	});
 
-	it("excludes GitHub Actions dependencies, which are not npm packages (PR #27)", () => {
-		// `actions/setup-node` looks identical to a package bump but would 404 on npm.
+	it("classifies a GitHub Actions bump as its own ecosystem (PR #27)", () => {
+		// `actions/setup-node` looks identical to a package bump and would 404 on
+		// npm, so it carries its ecosystem rather than being dropped.
 		const out = parseDependabotPr(
 			"chore(deps): bump actions/setup-node from 4 to 7",
 			"Bumps [actions/setup-node](https://github.com/actions/setup-node) from 4 to 7."
 		);
-		assert.deepEqual(out, []);
+		assert.deepEqual(out, [
+			{ name: "actions/setup-node", fromVersion: "4", toVersion: "7", ecosystem: "github-actions" },
+		]);
+	});
+
+	it("classifies a nested action path", () => {
+		const out = parseDependabotPr("chore(deps): bump github/codeql-action/init from 3.28.0 to 3.29.0");
+		assert.deepEqual(out, [
+			{
+				name: "github/codeql-action/init",
+				fromVersion: "3.28.0",
+				toVersion: "3.29.0",
+				ecosystem: "github-actions",
+			},
+		]);
+	});
+
+	it("mixes actions and npm packages in one grouped PR", () => {
+		const body = [
+			"Updates `actions/checkout` from 4 to 5",
+			"Updates `esbuild` from 0.28.1 to 0.28.2",
+		].join("\n");
+		const out = parseDependabotPr("chore(deps): bump the ci group", body);
+		assert.deepEqual(out, [
+			{ name: "actions/checkout", fromVersion: "4", toVersion: "5", ecosystem: "github-actions" },
+			{ name: "esbuild", fromVersion: "0.28.1", toVersion: "0.28.2" },
+		]);
 	});
 
 	it("keeps scoped npm packages, which also contain a slash", () => {
@@ -70,5 +97,31 @@ describe("parseDependabotPr", () => {
 	it("tolerates a missing body", () => {
 		const out = parseDependabotPr("build(deps-dev): bump tsx from 4.21.0 to 4.23.13", undefined);
 		assert.deepEqual(out, [{ name: "tsx", fromVersion: "4.21.0", toVersion: "4.23.13" }]);
+	});
+});
+
+// The parser reads a presentation format, not an API. If GitHub or Renovate
+// restyles a PR body it returns nothing, and a silent no-op reads as "broken".
+// Knowing the author was a dependency bot is what turns that into a loud warning.
+describe("isDependencyBot", () => {
+	it("recognises Dependabot", () => {
+		assert.equal(isDependencyBot("dependabot[bot]"), true);
+	});
+
+	it("recognises Renovate, self-hosted included", () => {
+		assert.equal(isDependencyBot("renovate[bot]"), true);
+		assert.equal(isDependencyBot("renovate-bot"), true);
+	});
+
+	it("ignores a human author", () => {
+		assert.equal(isDependencyBot("kaustubhdgr8"), false);
+	});
+
+	it("ignores an unrelated bot", () => {
+		assert.equal(isDependencyBot("codecov[bot]"), false);
+	});
+
+	it("tolerates a missing login", () => {
+		assert.equal(isDependencyBot(undefined), false);
 	});
 });

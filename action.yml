@@ -1,5 +1,5 @@
 name: "Dependabot Risk Report"
-description: "Ranks Dependabot PRs by real risk — security fixes and breaking changes from release notes, not semver."
+description: "Ranks Dependabot and Renovate PRs by real risk — security fixes and breaking changes from release notes, not semver."
 author: "Digicatalyst Systems"
 
 branding:
@@ -12,7 +12,7 @@ inputs:
     required: false
     default: ${{ github.token }}
   ecosystem:
-    description: "Package ecosystem to analyze: npm or pypi."
+    description: "Default ecosystem for names that do not settle it themselves: npm or pypi. GitHub Actions bumps are detected from the name and ignore this."
     required: false
     default: "npm"
   comment:
