@@ -52,6 +52,38 @@ export const SUMMARY_HEADING =
 	"[install it](https://github.com/marketplace/actions/dependabot-risk-report)</sub>";
 
 /** GitHub rejects a comment body over 65536 characters. Leave room for the notice. */
+/**
+ * A leading marker is what makes a list scannable -- you find the requirement
+ * without reading every line. Patterns are deliberately narrow: a wrong marker
+ * asserts something false, which is worse than none, so anything unrecognised
+ * falls back to the neutral one rather than being guessed at.
+ */
+const KIND_MARKERS: [RegExp, string][] = [
+	[/\b(?:now\s+requires?|minimum|must\s+be\s+on|or\s+later|upgrade\s+\S+\s+to\s+use|bump\s+\S+\s+to|requires?\s+(?:node|python|runner))\b/i, "⬆️"],
+	[/\b(?:remove[ds]?|removal|drop(?:ped|s)?\s+support|no\s+longer|deprecated?)\b/i, "🚫"],
+	[/\b(?:renamed?|replaced?|migrat(?:e|ed|ion)|moved?\s+to|switch(?:ed)?\s+to)\b/i, "🔄"],
+];
+
+const NEUTRAL_MARKER = "⚠️";
+
+function markerFor(change: string): string {
+	for (const [pattern, marker] of KIND_MARKERS) {
+		if (pattern.test(change)) return marker;
+	}
+	return NEUTRAL_MARKER;
+}
+
+/**
+ * Printed unconditionally to the run log, outside the collapsed group, so the
+ * report is attributable at a glance in a log full of other jobs.
+ */
+export const LOG_BANNER = [
+	"╔════════════════════════════════════════════════════════════════════╗",
+	"║   D E P E N D A B O T   R I S K   R E P O R T                      ║",
+	"║   by DigiCatalyst Systems                                          ║",
+	"╚════════════════════════════════════════════════════════════════════╝",
+].join("\n");
+
 export const MAX_COMMENT_CHARS = 60000;
 
 /**
@@ -178,7 +210,7 @@ function groupByTag(entries: string[]): string[] {
 		const m = entry.match(TAGGED);
 		if (!m) {
 			lastTag = null;
-			out.push(`- ${entry}`);
+			out.push(`- ${markerFor(entry)} ${entry}`);
 			continue;
 		}
 		const [, tag, text] = m as unknown as [string, string, string];
@@ -187,7 +219,7 @@ function groupByTag(entries: string[]): string[] {
 			out.push(`\`${tag}\``);
 			lastTag = tag;
 		}
-		out.push(`- ${text}`);
+		out.push(`- ${markerFor(text)} ${text}`);
 	}
 	return out;
 }
@@ -235,11 +267,11 @@ function grouped(attention: Analyzed[], routine: Analyzed[], total: number): str
 			// a job summary alike -- the blank line after </summary> is what lets
 			// the markdown inside it render.
 			const shown = a.breakingChanges!.slice(0, GROUPED_VISIBLE);
-			for (const b of shown) out.push(`  - ${b}`);
+			for (const b of shown) out.push(`  - ${markerFor(b)} ${b}`);
 			const rest = a.breakingChanges!.slice(GROUPED_VISIBLE);
 			if (rest.length > 0) {
 				out.push(`  <details><summary>…and ${rest.length} more</summary>`, "");
-				for (const b of rest) out.push(`  - ${b}`);
+				for (const b of rest) out.push(`  - ${markerFor(b)} ${b}`);
 				out.push("  </details>");
 			}
 		}

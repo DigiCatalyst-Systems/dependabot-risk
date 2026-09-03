@@ -27330,6 +27330,24 @@ var URGENCY = {
 };
 var FOOTER = "<sub>[Dependabot Risk Report](https://github.com/marketplace/actions/dependabot-risk-report) by DigiCatalyst Systems \xB7 ranked by what the release notes and advisories actually say, not by semver \xB7 powered by [dep-diff-mcp](https://github.com/DigiCatalyst-Systems/dep-diff-mcp).</sub>";
 var SUMMARY_HEADING = "## \u{1F6E1}\uFE0F Dependabot Risk Report\n\n<sub>by DigiCatalyst Systems \xB7 [install it](https://github.com/marketplace/actions/dependabot-risk-report)</sub>";
+var KIND_MARKERS = [
+  [/\b(?:now\s+requires?|minimum|must\s+be\s+on|or\s+later|upgrade\s+\S+\s+to\s+use|bump\s+\S+\s+to|requires?\s+(?:node|python|runner))\b/i, "\u2B06\uFE0F"],
+  [/\b(?:remove[ds]?|removal|drop(?:ped|s)?\s+support|no\s+longer|deprecated?)\b/i, "\u{1F6AB}"],
+  [/\b(?:renamed?|replaced?|migrat(?:e|ed|ion)|moved?\s+to|switch(?:ed)?\s+to)\b/i, "\u{1F504}"]
+];
+var NEUTRAL_MARKER = "\u26A0\uFE0F";
+function markerFor(change) {
+  for (const [pattern, marker] of KIND_MARKERS) {
+    if (pattern.test(change)) return marker;
+  }
+  return NEUTRAL_MARKER;
+}
+var LOG_BANNER = [
+  "\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557",
+  "\u2551   D E P E N D A B O T   R I S K   R E P O R T                      \u2551",
+  "\u2551   by DigiCatalyst Systems                                          \u2551",
+  "\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255D"
+].join("\n");
 var MAX_COMMENT_CHARS = 6e4;
 function capForComment(body) {
   if (body.length <= MAX_COMMENT_CHARS) return body;
@@ -27414,7 +27432,7 @@ function groupByTag(entries) {
     const m = entry.match(TAGGED);
     if (!m) {
       lastTag = null;
-      out.push(`- ${entry}`);
+      out.push(`- ${markerFor(entry)} ${entry}`);
       continue;
     }
     const [, tag, text] = m;
@@ -27423,7 +27441,7 @@ function groupByTag(entries) {
       out.push(`\`${tag}\``);
       lastTag = tag;
     }
-    out.push(`- ${text}`);
+    out.push(`- ${markerFor(text)} ${text}`);
   }
   return out;
 }
@@ -27459,11 +27477,11 @@ function grouped(attention, routine, total) {
         `- \`${a.package}\` ${a.fromVersion} \u2192 ${a.toVersion} \u2014 ${a.breakingChanges.length} breaking change${a.breakingChanges.length === 1 ? "" : "s"}${link ? ` \xB7 [migration guide](${link})` : ""}`
       );
       const shown = a.breakingChanges.slice(0, GROUPED_VISIBLE);
-      for (const b of shown) out.push(`  - ${b}`);
+      for (const b of shown) out.push(`  - ${markerFor(b)} ${b}`);
       const rest = a.breakingChanges.slice(GROUPED_VISIBLE);
       if (rest.length > 0) {
         out.push(`  <details><summary>\u2026and ${rest.length} more</summary>`, "");
-        for (const b of rest) out.push(`  - ${b}`);
+        for (const b of rest) out.push(`  - ${markerFor(b)} ${b}`);
         out.push("  </details>");
       }
     }
@@ -27575,6 +27593,9 @@ async function run() {
   await summary.addRaw(`${SUMMARY_HEADING}
 
 ${report}`).write();
+  info(`
+${LOG_BANNER}
+`);
   startGroup("Risk report");
   info(report);
   endGroup();

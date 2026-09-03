@@ -7,6 +7,7 @@ import {
 	capForComment,
 	MAX_COMMENT_CHARS,
 	SUMMARY_HEADING,
+	LOG_BANNER,
 	type Analyzed,
 } from "../src/render.ts";
 
@@ -159,8 +160,8 @@ describe("breaking changes grouped by release tag", () => {
 	it("prints each tag once as a subheading", () => {
 		const out = renderComment([zod]);
 		assert.equal(out.match(/v4\.5\.0/g)?.length, 1, out);
-		assert.match(out, /`v4\.5\.0`\n- `z\.iso\.datetime\(\)` requires seconds\n- String length counts code points/);
-		assert.match(out, /`v4\.4\.0`\n- Stricter string formats/);
+		assert.match(out, /`v4\.5\.0`\n- \S+ `z\.iso\.datetime\(\)` requires seconds\n- \S+ String length counts code points/);
+		assert.match(out, /`v4\.4\.0`\n- \S+ Stricter string formats/);
 	});
 
 	it("does not repeat the tag inside the bullets", () => {
@@ -174,7 +175,7 @@ describe("breaking changes grouped by release tag", () => {
 
 	it("renders an entry with no tag prefix as a plain bullet", () => {
 		const out = renderComment([{ ...zod, breakingChanges: ["Something broke"] }]);
-		assert.match(out, /- Something broke/);
+		assert.match(out, /- \S+ Something broke/);
 	});
 });
 
@@ -344,5 +345,66 @@ describe("capForComment", () => {
 		const out = capForComment(body);
 		assert.ok(out.length <= MAX_COMMENT_CHARS, `still ${out.length}`);
 		assert.match(out, /job summary/i);
+	});
+});
+
+describe("change kind markers", () => {
+	const withChanges = (changes: string[]) => [
+		{
+			package: "actions/setup-node",
+			fromVersion: "4",
+			toVersion: "7",
+			semverClass: "major" as const,
+			recommendationLevel: "caution" as const,
+			securityFixes: [],
+			breakingChanges: changes,
+		},
+	];
+
+	// A leading marker is what makes a list scannable: you find the requirement
+	// without reading every line.
+	it("marks a new minimum requirement", () => {
+		const out = renderComment(withChanges([
+			"v5.0.0: Upgrade action to use node24. Make sure your runner is on version v2.327.1 or later.",
+		]));
+		assert.match(out, /- ⬆️ Upgrade action to use node24/);
+	});
+
+	it("marks a removal", () => {
+		const out = renderComment(withChanges(["v6.1.0: Remove always-auth configuration handling"]));
+		assert.match(out, /- 🚫 Remove always-auth/);
+	});
+
+	it("marks a rename or replacement", () => {
+		const out = renderComment(withChanges(["v6.3.0: Replace uuid with crypto.randomUUID()"]));
+		assert.match(out, /- 🔄 Replace uuid/);
+	});
+
+	it("falls back to a neutral marker rather than guessing", () => {
+		const out = renderComment(withChanges(["v5.0.0: Minimum Compatible Runner Version"]));
+		assert.match(out, /- (⬆️|⚠️) Minimum Compatible Runner Version/);
+	});
+
+	it("marks every change, so the list stays aligned", () => {
+		const out = renderComment(withChanges([
+			"v7.0.0: Migrate to ESM and upgrade dependencies",
+			"v6.1.0: Remove always-auth configuration handling",
+			"v5.0.0: Something entirely unclassifiable happened",
+		]));
+		for (const line of out.split("\n").filter((l) => /^- v\d/.test(l.trim()))) {
+			assert.fail(`unmarked change line: ${line}`);
+		}
+	});
+});
+
+describe("log banner", () => {
+	it("is wide enough to read but not so wide it wraps", () => {
+		const widest = Math.max(...LOG_BANNER.split("\n").map((l) => l.length));
+		assert.ok(widest <= 80, `banner is ${widest} chars wide`);
+		assert.ok(LOG_BANNER.split("\n").length >= 3, "expected a multi-line banner");
+	});
+
+	it("names the action", () => {
+		assert.match(LOG_BANNER.replace(/\s+/g, " "), /D E P E N D A B O T|DEPENDABOT/i);
 	});
 });
