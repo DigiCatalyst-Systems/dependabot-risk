@@ -26,3 +26,9 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      # Every action lives in the same handful of workflow files, so one pull
+      # request per action means each merge leaves the rest conflicting.
+      # One grouped pull request avoids the pile-up entirely.
+      actions:
+        patterns: ["*"]
