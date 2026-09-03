@@ -1,0 +1,17 @@
+{
+	"name": "dependabot-risk",
+	"version": "1.0.0",
+	"description": "Not an npm package — this name points at the Dependabot Risk Report GitHub Action. See the repository.",
+	"keywords": ["dependabot", "renovate", "github-actions", "security", "dependencies"],
+	"homepage": "https://github.com/DigiCatalyst-Systems/dependabot-risk#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/DigiCatalyst-Systems/dependabot-risk.git"
+	},
+	"bugs": {
+		"url": "https://github.com/DigiCatalyst-Systems/dependabot-risk/issues"
+	},
+	"author": "Kaustubh Ghodke",
+	"license": "MIT",
+	"files": ["README.md", "LICENSE"]
+}
