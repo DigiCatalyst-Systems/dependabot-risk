@@ -1,0 +1,37 @@
+name: "Dependabot Risk Report"
+description: "Ranks Dependabot PRs by real risk — security fixes and breaking changes from release notes, not semver."
+author: "Digicatalyst Systems"
+
+branding:
+  icon: "shield"
+  color: "orange"
+
+inputs:
+  github-token:
+    description: "Token used to read release notes and post the comment. The default job token is enough."
+    required: false
+    default: ${{ github.token }}
+  ecosystem:
+    description: "Package ecosystem to analyze: npm or pypi."
+    required: false
+    default: "npm"
+  comment:
+    description: "Post (and update) a risk report comment on the pull request."
+    required: false
+    default: "true"
+  fail-on:
+    description: "Fail the check when risk reaches this level: security, caution, review, likely-safe, safe, or none."
+    required: false
+    default: "none"
+
+outputs:
+  highest-level:
+    description: "Riskiest recommendation level found: security, caution, review, likely-safe or safe."
+  security-count:
+    description: "Total number of security advisories resolved across the pull request."
+  summary:
+    description: "The rendered Markdown report."
+
+runs:
+  using: "node24"
+  main: "dist/index.js"

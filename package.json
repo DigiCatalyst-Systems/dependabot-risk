@@ -1,0 +1,24 @@
+{
+	"name": "dependabot-risk",
+	"version": "1.0.0",
+	"private": true,
+	"description": "GitHub Action that ranks Dependabot PRs by real risk — security fixes and breaking changes from release notes, not semver.",
+	"type": "module",
+	"scripts": {
+		"build": "esbuild src/main.ts --bundle --platform=node --target=node24 --format=esm --outfile=dist/index.js --banner:js=\"import{createRequire}from'node:module';const require=createRequire(import.meta.url);\"",
+		"test": "node --import tsx --test tests/*.test.ts",
+		"typecheck": "tsc --noEmit"
+	},
+	"license": "MIT",
+	"dependencies": {
+		"@actions/core": "^1.11.1",
+		"@actions/github": "^6.0.1",
+		"@digicatalyst/dep-diff-mcp": "^0.2.4"
+	},
+	"devDependencies": {
+		"@types/node": "^26.4.0",
+		"esbuild": "^0.28.0",
+		"tsx": "^4.23.13",
+		"typescript": "^7.0.2"
+	}
+}
