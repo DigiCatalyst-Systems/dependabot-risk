@@ -20457,7 +20457,7 @@ var require_truncate = __commonJS({
     var parse3 = require_parse2();
     var constants3 = require_constants6();
     var SemVer = require_semver();
-    var truncate = (version, truncation, options) => {
+    var truncate2 = (version, truncation, options) => {
       if (!constants3.RELEASE_TYPES.includes(truncation)) {
         return null;
       }
@@ -20487,7 +20487,7 @@ var require_truncate = __commonJS({
     var isPrerelease = (type) => {
       return type.startsWith("pre");
     };
-    module.exports = truncate;
+    module.exports = truncate2;
   }
 });
 
@@ -21533,7 +21533,7 @@ var require_semver2 = __commonJS({
     var lte = require_lte();
     var cmp = require_cmp();
     var coerce = require_coerce();
-    var truncate = require_truncate();
+    var truncate2 = require_truncate();
     var Comparator = require_comparator();
     var Range = require_range();
     var satisfies = require_satisfies();
@@ -21572,7 +21572,7 @@ var require_semver2 = __commonJS({
       lte,
       cmp,
       coerce,
-      truncate,
+      truncate: truncate2,
       Comparator,
       Range,
       satisfies,
@@ -21942,11 +21942,11 @@ var Summary = class {
    */
   addTable(rows) {
     const tableBody = rows.map((row) => {
-      const cells = row.map((cell) => {
-        if (typeof cell === "string") {
-          return this.wrap("td", cell);
+      const cells = row.map((cell2) => {
+        if (typeof cell2 === "string") {
+          return this.wrap("td", cell2);
         }
-        const { header, data, colspan, rowspan } = cell;
+        const { header, data, colspan, rowspan } = cell2;
         const tag = header ? "th" : "td";
         const attrs = Object.assign(Object.assign({}, colspan && { colspan }), rowspan && { rowspan });
         return this.wrap(tag, data, attrs);
@@ -27330,18 +27330,6 @@ var URGENCY = {
 };
 var FOOTER = "<sub>[Dependabot Risk Report](https://github.com/marketplace/actions/dependabot-risk-report) by DigiCatalyst Systems \xB7 ranked by what the release notes and advisories actually say, not by semver \xB7 powered by [dep-diff-mcp](https://github.com/DigiCatalyst-Systems/dep-diff-mcp).</sub>";
 var SUMMARY_HEADING = "## \u{1F6E1}\uFE0F Dependabot Risk Report\n\n<sub>by DigiCatalyst Systems \xB7 [install it](https://github.com/marketplace/actions/dependabot-risk-report)</sub>";
-var KIND_MARKERS = [
-  [/\b(?:now\s+requires?|minimum|must\s+be\s+on|or\s+later|upgrade\s+\S+\s+to\s+use|bump\s+\S+\s+to|requires?\s+(?:node|python|runner))\b/i, "\u2B06\uFE0F"],
-  [/\b(?:remove[ds]?|removal|drop(?:ped|s)?\s+support|no\s+longer|deprecated?)\b/i, "\u{1F6AB}"],
-  [/\b(?:renamed?|replaced?|migrat(?:e|ed|ion)|moved?\s+to|switch(?:ed)?\s+to)\b/i, "\u{1F504}"]
-];
-var NEUTRAL_MARKER = "\u26A0\uFE0F";
-function markerFor(change) {
-  for (const [pattern, marker] of KIND_MARKERS) {
-    if (pattern.test(change)) return marker;
-  }
-  return NEUTRAL_MARKER;
-}
 var LOG_BANNER = [
   "\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557",
   "\u2551   D E P E N D A B O T   R I S K   R E P O R T                      \u2551",
@@ -27354,7 +27342,6 @@ function capForComment(body) {
   const notice = "\n\n<sub>Report truncated \u2014 it exceeded GitHub's comment size limit. The full report is in the job summary.</sub>";
   return body.slice(0, MAX_COMMENT_CHARS - notice.length) + notice;
 }
-var GROUPED_VISIBLE = 3;
 function highestLevel(analyses) {
   if (analyses.length === 0) return "safe";
   return analyses.reduce((worst, a) => rank(a) < rank(worst) ? a : worst).recommendationLevel;
@@ -27432,7 +27419,7 @@ function groupByTag(entries) {
     const m = entry.match(TAGGED);
     if (!m) {
       lastTag = null;
-      out.push(`- ${markerFor(entry)} ${entry}`);
+      out.push(`- ${entry}`);
       continue;
     }
     const [, tag, text] = m;
@@ -27441,72 +27428,75 @@ function groupByTag(entries) {
       out.push(`\`${tag}\``);
       lastTag = tag;
     }
-    out.push(`- ${markerFor(text)} ${text}`);
+    out.push(`- ${text}`);
   }
   return out;
 }
 function grouped(attention, routine, total) {
   const out = [
     `### ${attention.length} of ${total} update${total === 1 ? "" : "s"} need${attention.length === 1 ? "s" : ""} a look`,
-    ""
+    "",
+    "|  | Package | Change | What to know |",
+    "|---|---|---|---|"
   ];
-  const security = attention.filter((a) => (a.securityFixes?.length ?? 0) > 0);
-  const breaking = attention.filter(
-    (a) => (a.breakingChanges?.length ?? 0) > 0 && (a.securityFixes?.length ?? 0) === 0
-  );
-  const unclear = attention.filter((a) => a.error);
-  const other = attention.filter(
-    (a) => !security.includes(a) && !breaking.includes(a) && !unclear.includes(a)
-  );
-  if (security.length > 0) {
-    out.push("**\u{1F534} Merge first**");
-    for (const a of security) {
-      const worst = (a.securityFixes ?? [])[0];
-      const extra = (a.securityFixes ?? []).length - 1;
-      out.push(
-        `- \`${a.package}\` ${a.fromVersion} \u2192 ${a.toVersion} \u2014 closes **${cleanSummary(worst, a.package)}** (${urgency(worst.severity)})${extra > 0 ? ` and ${extra} more` : ""}`
-      );
-    }
-    out.push("");
+  const all = [...attention, ...routine];
+  for (const a of all) {
+    const change = a.error ? "\u2014" : `${a.fromVersion} \u2192 ${a.toVersion}`;
+    out.push(`| ${packageMarker(a)} | \`${a.package}\` | ${change} | ${cell(whatToKnow(a))} |`);
   }
-  if (breaking.length > 0) {
-    out.push("**\u26A0\uFE0F Read first**");
-    for (const a of breaking) {
-      const link = (a.migrationLinks ?? [])[0];
-      out.push(
-        `- \`${a.package}\` ${a.fromVersion} \u2192 ${a.toVersion} \u2014 ${a.breakingChanges.length} breaking change${a.breakingChanges.length === 1 ? "" : "s"}${link ? ` \xB7 [migration guide](${link})` : ""}`
-      );
-      const shown = a.breakingChanges.slice(0, GROUPED_VISIBLE);
-      for (const b of shown) out.push(`  - ${markerFor(b)} ${b}`);
-      const rest = a.breakingChanges.slice(GROUPED_VISIBLE);
-      if (rest.length > 0) {
-        out.push(`  <details><summary>\u2026and ${rest.length} more</summary>`, "");
-        for (const b of rest) out.push(`  - ${markerFor(b)} ${b}`);
-        out.push("  </details>");
-      }
-    }
-    out.push("");
-  }
-  for (const [heading, group] of [
-    ["**\u{1F7E1} Worth a look**", other],
-    ["**\u{1F7E1} Could not check**", unclear]
-  ]) {
-    if (group.length === 0) continue;
-    out.push(heading);
-    for (const a of group) {
-      out.push(
-        a.error ? `- \`${a.package}\` \u2014 ${a.error}` : `- \`${a.package}\` ${a.fromVersion} \u2192 ${a.toVersion} \u2014 ${a.recommendation ?? "review recommended"}`
-      );
-    }
-    out.push("");
-  }
-  if (routine.length > 0) {
+  for (const a of all) {
+    const breaks = a.breakingChanges ?? [];
+    if (breaks.length === 0) continue;
     out.push(
-      "**\u2705 Routine** \u2014 no advisories, no breaking changes",
-      routine.map((a) => `\`${a.package}\``).join(", ")
+      "",
+      `<details><summary><b>${a.package}</b> \u2014 what breaks</summary>`,
+      "",
+      ...groupByTag(breaks)
     );
+    for (const link of a.migrationLinks ?? []) out.push("", `[Migration guide \u2192](${link})`);
+    out.push("", "</details>");
   }
   return out;
+}
+function packageMarker(a) {
+  if ((a.securityFixes?.length ?? 0) > 0) return "\u{1F6A8}";
+  if ((a.breakingChanges?.length ?? 0) > 0) return "\u{1F6AB}";
+  if (a.error || needsAttention(a)) return "\u26A0\uFE0F";
+  return "\u2705";
+}
+function cell(text) {
+  return text.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+}
+var MAX_CELL_LEN = 90;
+function whatToKnow(a) {
+  if (a.error) return `could not check \u2014 ${a.error}`;
+  const fixes = a.securityFixes ?? [];
+  if (fixes.length > 0) {
+    const worst = fixes[0];
+    const more = fixes.length - 1;
+    const text = `closes ${cleanSummary(worst, a.package)} (${urgency(worst.severity)})` + (more > 0 ? ` \xB7 ${more} more` : "");
+    return truncate(text);
+  }
+  const breaks = a.breakingChanges ?? [];
+  if (breaks.length > 0) {
+    const count = `${breaks.length} breaking change${breaks.length === 1 ? "" : "s"}`;
+    const headline = highlightOf(breaks);
+    return truncate(headline ? `${count} \xB7 ${headline}` : count);
+  }
+  if (needsAttention(a)) return truncate(a.recommendation ?? "review recommended");
+  return "nothing found";
+}
+function highlightOf(changes) {
+  const requirement = changes.find((c) => REQUIREMENT.test(c));
+  const pick = requirement ?? changes[0];
+  return pick.replace(/^\S+:\s*/, "").replace(/\s*\[[^\]]*\]\([^)]*\)\s*$/, "").trim();
+}
+var REQUIREMENT = /\b(?:now\s+requires?|minimum|must\s+be\s+on|or\s+later|upgrade\s+\S+\s+to\s+use|requires?\s+(?:node|python|runner))\b/i;
+function truncate(text) {
+  if (text.length <= MAX_CELL_LEN) return text;
+  const cut = text.slice(0, MAX_CELL_LEN);
+  const space = cut.lastIndexOf(" ");
+  return (space > MAX_CELL_LEN * 0.6 ? cut.slice(0, space) : cut).trimEnd() + "\u2026";
 }
 function cleanSummary(f, pkg) {
   const escaped = pkg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
