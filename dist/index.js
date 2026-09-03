@@ -27059,6 +27059,49 @@ function trimLine(line, max) {
 var BREAKING_MARKER = /^\s*(?:💥|🚨|⚠️|breaking\s+changes?|breaking)\s*[:–—-]*\s*/i;
 var HEADING_LINE = /^#{1,4}\s+(.*)$/;
 var MAX_SECTIONS_PER_RELEASE = 5;
+var BULLET_LINE = /^\s*[-*+]\s+/;
+var MAX_SECTION_ENTRY_LEN = 240;
+function splitSectionEntries(lines) {
+  const prose = stripFences(lines);
+  if (!prose.some((l) => BULLET_LINE.test(l))) {
+    const single2 = condenseLines(prose);
+    return single2 ? [single2] : [];
+  }
+  const chunks = [];
+  for (const line of prose) {
+    if (BULLET_LINE.test(line))
+      chunks.push([line]);
+    else if (chunks.length > 0)
+      chunks[chunks.length - 1].push(line);
+  }
+  const out = [];
+  for (const chunk of chunks) {
+    const text = condenseLines(chunk, MAX_SECTION_ENTRY_LEN);
+    if (text && !CHORE_BULLET.test(text))
+      out.push(text);
+  }
+  return out;
+}
+function stripFences(lines) {
+  const out = [];
+  let fenced = false;
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) {
+      fenced = !fenced;
+      continue;
+    }
+    if (!fenced)
+      out.push(line);
+  }
+  return out;
+}
+function condenseLines(lines, max = MAX_SECTION_LEN) {
+  const kept = lines.map((l) => l.trim().replace(/^[-*+]\s*/, "").replace(/\*\*/g, "").replace(ATTRIBUTION, "").trim()).filter((l) => l.length > 0 && !CHORE_BULLET.test(l));
+  if (kept.length === 0)
+    return "";
+  const joined = kept.map((l, i) => i === kept.length - 1 || /[.!?:;]$/.test(l) ? l : l + ".").join(" ");
+  return joined.length > max ? joined.slice(0, max) + "\u2026" : joined;
+}
 function condenseSection(lines) {
   const prose = [];
   let fenced = false;
@@ -27085,9 +27128,13 @@ function extractBreakingSections(body, tag) {
     if (current === null)
       return;
     const title = current.replace(BREAKING_MARKER, "").replace(/[\s#]+$/, "").trim();
-    const text = title || condenseSection(buffer);
-    if (text && !CHORE_BULLET.test(text))
-      out.push(`${tag}: ${text}`);
+    if (title) {
+      if (!CHORE_BULLET.test(title))
+        out.push(`${tag}: ${title}`);
+    } else {
+      for (const text of splitSectionEntries(buffer))
+        out.push(`${tag}: ${text}`);
+    }
     current = null;
     buffer = [];
   };
@@ -27132,7 +27179,7 @@ function extractBreakingChanges(releases) {
         break;
     }
   }
-  return breaking;
+  return [...new Set(breaking)];
 }
 var MAX_EXCERPT_RELEASES = 5;
 var MAX_EXCERPT_LEN = 500;
