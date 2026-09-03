@@ -55,6 +55,10 @@ export function parseDependabotPr(title: string, body?: string): DependabotChang
 
 export function isDependencyBot(login: string | undefined): boolean {
 	if (!login) return false;
-	const bare = login.toLowerCase().replace(/\[bot\]$/, "").replace(/-bot$/, "");
+	const bare = login
+		.toLowerCase()
+		.replace(/^app\//, "")
+		.replace(/\[bot\]$/, "")
+		.replace(/-bot$/, "");
 	return bare === "dependabot" || bare === "renovate";
 }

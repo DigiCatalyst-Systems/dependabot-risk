@@ -26486,7 +26486,59 @@ async function cached(key, fn) {
   cache.set(key, value);
   return value;
 }
-var OSV_ECOSYSTEM = { npm: "npm", pypi: "PyPI" };
+var OSV_ECOSYSTEM = {
+  npm: "npm",
+  pypi: "PyPI",
+  "github-actions": "GitHub Actions"
+};
+function parseActionRepo(name) {
+  if (name.startsWith("@"))
+    return null;
+  const [owner, repo] = name.split("/");
+  if (!owner || !repo)
+    return null;
+  return { owner, repo };
+}
+function isVersionAffected(vuln, name, version) {
+  const parsed = import_semver.default.coerce(version);
+  if (!parsed)
+    return false;
+  for (const affected of vuln?.affected ?? []) {
+    if (affected?.package?.name !== name)
+      continue;
+    if (Array.isArray(affected.versions) && affected.versions.length > 0) {
+      if (affected.versions.some((v) => import_semver.default.coerce(v)?.version === parsed.version)) {
+        return true;
+      }
+    }
+    for (const range of affected.ranges ?? []) {
+      let introduced = null;
+      for (const event of range?.events ?? []) {
+        if (event.introduced !== void 0) {
+          introduced = event.introduced === "0" ? import_semver.default.coerce("0.0.0") : import_semver.default.coerce(event.introduced);
+          if (introduced && import_semver.default.lt(parsed, introduced))
+            introduced = null;
+        } else if (event.fixed !== void 0 && introduced) {
+          const fixed = import_semver.default.coerce(event.fixed);
+          if (fixed && import_semver.default.lt(parsed, fixed))
+            return true;
+          introduced = null;
+        } else if (event.last_affected !== void 0 && introduced) {
+          const last = import_semver.default.coerce(event.last_affected);
+          if (last && import_semver.default.lte(parsed, last))
+            return true;
+          introduced = null;
+        }
+      }
+      if (introduced)
+        return true;
+    }
+  }
+  return false;
+}
+function selectFixedCves(vulns, name, from, to) {
+  return vulns.filter((v) => isVersionAffected(v, name, from) && !isVersionAffected(v, name, to));
+}
 function classifyBump(from, to) {
   const cleanFrom = import_semver.default.coerce(from)?.version;
   const cleanTo = import_semver.default.coerce(to)?.version;
@@ -26658,6 +26710,19 @@ async function fetchCvesAtVersion(ecosystem, name, version) {
     return data.vulns ?? [];
   });
 }
+async function fetchAllCves(ecosystem, name) {
+  return cached(`osv-all:${ecosystem}:${name}`, async () => {
+    const res = await fetch("https://api.osv.dev/v1/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ package: { name, ecosystem: OSV_ECOSYSTEM[ecosystem] } })
+    });
+    if (!res.ok)
+      return [];
+    const data = await res.json();
+    return data.vulns ?? [];
+  });
+}
 var BREAKING_HEADER = /(?:^|\n)#{1,4}\s*(?:breaking changes?|breaking|💥|🚨|⚠️)/i;
 var STRONG_BULLET = new RegExp("^[\\s]*[-*+][\\s]+(?:\\*\\*)?(?:breaking[:\\s]|removed?\\b|drop(?:ped|s)?\\s+support|no\\s+longer\\b|now\\s+requires?\\b|renamed?\\b|deprecated\\b|replaced?\\b|migrated?\\b|incompatible\\b|changed?\\s+(?:behavior|default|signature)|minimum\\s+(?:node|python|version))", "im");
 var CHORE_BULLET = new RegExp("^(?:chore|ci|test|docs?|build|style|refactor|perf)(?:\\([^)]*\\))?:|\\bci\\b|appveyor|\\bgha\\b|github\\s+actions|workflow|\\blint(?:ing|er)?\\b|jsdoc|\\btypos?\\b|\\btests?\\b|testing|coverage|readme|changelog|contributing|dependabot|codecov|benchmark", "i");
@@ -26760,15 +26825,27 @@ function generateRecommendation(semverClass, breaking, fixedCves) {
 }
 async function analyzePackageChange(ecosystem, name, fromVersion, toVersion, githubToken) {
   const semverClass = classifyBump(fromVersion, toVersion);
-  const meta = ecosystem === "npm" ? await fetchNpmMeta(name) : await fetchPyPIMeta(name);
-  const repo = extractGitHubRepo(meta, ecosystem);
-  const [releases, cvesAtFrom, cvesAtTo] = await Promise.all([
-    repo ? fetchReleasesBetween(repo.owner, repo.repo, fromVersion, toVersion, githubToken).catch(() => []) : Promise.resolve([]),
-    fetchCvesAtVersion(ecosystem, name, fromVersion).catch(() => []),
-    fetchCvesAtVersion(ecosystem, name, toVersion).catch(() => [])
-  ]);
-  const toIds = new Set(cvesAtTo.map((c) => c.id));
-  const fixedCves = cvesAtFrom.filter((c) => !toIds.has(c.id));
+  const repo = ecosystem === "github-actions" ? parseActionRepo(name) : extractGitHubRepo(ecosystem === "npm" ? await fetchNpmMeta(name) : await fetchPyPIMeta(name), ecosystem);
+  const releasesPromise = repo ? fetchReleasesBetween(repo.owner, repo.repo, fromVersion, toVersion, githubToken).catch(() => []) : Promise.resolve([]);
+  let fixedCves;
+  let releases;
+  if (ecosystem === "github-actions") {
+    const [rel, allCves] = await Promise.all([
+      releasesPromise,
+      fetchAllCves(ecosystem, name).catch(() => [])
+    ]);
+    releases = rel;
+    fixedCves = selectFixedCves(allCves, name, fromVersion, toVersion);
+  } else {
+    const [rel, cvesAtFrom, cvesAtTo] = await Promise.all([
+      releasesPromise,
+      fetchCvesAtVersion(ecosystem, name, fromVersion).catch(() => []),
+      fetchCvesAtVersion(ecosystem, name, toVersion).catch(() => [])
+    ]);
+    releases = rel;
+    const toIds = new Set(cvesAtTo.map((c) => c.id));
+    fixedCves = cvesAtFrom.filter((c) => !toIds.has(c.id));
+  }
   const breakingChanges = extractBreakingChanges(releases);
   const migrationLinks = extractMigrationLinks(releases);
   const rec = generateRecommendation(semverClass, breakingChanges, fixedCves);
@@ -26802,16 +26879,18 @@ async function analyzePackageChange(ecosystem, name, fromVersion, toVersion, git
 var GROUPED = /^Updates\s+`([^`]+)`\s+from\s+(\S+)\s+to\s+(\S+)/gim;
 var BUMPS = /^Bumps\s+(?:\[([^\]]+)\]\([^)]*\)|([^\s[]+))\s+from\s+(\S+)\s+to\s+(\S+)/gim;
 var TITLE = /\bbumps?\s+(?:\[([^\]]+)\]\([^)]*\)|([^\s[]+))\s+from\s+(\S+)\s+to\s+(\S+)/i;
-function isPackage(name) {
-  return !(name.includes("/") && !name.startsWith("@"));
+function isActionReference(name) {
+  return name.includes("/") && !name.startsWith("@");
 }
 var clean = (v) => v.replace(/[.,;]+$/, "");
 function parseDependabotPr(title, body) {
   const found = [];
   const push = (name, from, to) => {
     const n = name.trim();
-    if (!n || !isPackage(n)) return;
-    found.push({ name: n, fromVersion: clean(from), toVersion: clean(to) });
+    if (!n) return;
+    const change = { name: n, fromVersion: clean(from), toVersion: clean(to) };
+    if (isActionReference(n)) change.ecosystem = "github-actions";
+    found.push(change);
   };
   if (body) {
     for (const m of body.matchAll(GROUPED)) push(m[1], m[2], m[3]);
@@ -26821,6 +26900,48 @@ function parseDependabotPr(title, body) {
   if (t) push(t[1] ?? t[2], t[3], t[4]);
   const seen = /* @__PURE__ */ new Set();
   return found.filter((c) => !seen.has(c.name) && seen.add(c.name));
+}
+function isDependencyBot(login) {
+  if (!login) return false;
+  const bare = login.toLowerCase().replace(/^app\//, "").replace(/\[bot\]$/, "").replace(/-bot$/, "");
+  return bare === "dependabot" || bare === "renovate";
+}
+
+// src/renovate.ts
+var ROW = /^\s*\|\s*(?:\[([^\]]+)\]\([^)]*\)|([^|[\]]+?))\s*(?:\([^|]*\))?\s*\|\s*`([^`]+)`\s*(?:->|→)\s*`([^`]+)`\s*\|/gm;
+var BADGE_ECOSYSTEM = /developer\.mend\.io\/api\/mc\/badges\/[^/]+\/([^/]+)\//;
+var BADGE_MAP = {
+  npm: "npm",
+  pypi: "pypi",
+  "github-actions": "github-actions",
+  "github-tags": "github-actions"
+};
+var stripRange = (v) => v.replace(/^[\^~=<>!\s]+/, "").trim();
+function parseRenovatePr(body) {
+  if (!body) return [];
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const line of body.split("\n")) {
+    ROW.lastIndex = 0;
+    const m = ROW.exec(line);
+    if (!m) continue;
+    const name = (m[1] ?? m[2] ?? "").trim();
+    const fromVersion = stripRange(m[3]);
+    const toVersion = stripRange(m[4]);
+    if (!name || !fromVersion || !toVersion) continue;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const change = { name, fromVersion, toVersion };
+    const ecosystem = detectEcosystem(name, line);
+    if (ecosystem) change.ecosystem = ecosystem;
+    out.push(change);
+  }
+  return out;
+}
+function detectEcosystem(name, line) {
+  if (name.includes("/") && !name.startsWith("@")) return "github-actions";
+  const badge = line.match(BADGE_ECOSYSTEM);
+  return badge?.[1] ? BADGE_MAP[badge[1].toLowerCase()] : void 0;
 }
 
 // src/render.ts
@@ -27000,18 +27121,33 @@ async function run() {
     core.info("Not a pull_request event \u2014 nothing to analyze.");
     return;
   }
-  const changes = parseDependabotPr(pr.title ?? "", pr.body ?? void 0);
+  const body = pr.body ?? void 0;
+  const changes = [
+    ...parseDependabotPr(pr.title ?? "", body),
+    ...parseRenovatePr(body)
+  ].filter((c, i, all) => all.findIndex((o) => o.name === c.name) === i);
   if (changes.length === 0) {
-    core.info("No dependency bumps found in this pull request.");
+    if (isDependencyBot(pr.user?.login)) {
+      core.warning(
+        `Could not read any version changes from this ${pr.user?.login} pull request. The body format may have changed \u2014 please open an issue at https://github.com/DigiCatalyst-Systems/dependabot-risk/issues with a link to this PR.`
+      );
+    } else {
+      core.info("No dependency bumps found in this pull request.");
+    }
     core.setOutput("highest-level", "safe");
     core.setOutput("security-count", "0");
     return;
   }
-  core.info(`Analyzing ${changes.length} package change(s) in ${ecosystem}.`);
+  const actionCount = changes.filter((c) => c.ecosystem === "github-actions").length;
+  core.info(
+    `Analyzing ${changes.length} package change(s): ${changes.length - actionCount} in ${ecosystem}, ${actionCount} github-actions.`
+  );
   const analyses = await mapLimit(changes, CONCURRENCY, async (c) => {
     try {
       return await analyzePackageChange(
-        ecosystem,
+        // A slashed, unscoped name is a repository coordinate, so the name
+        // itself settles the ecosystem regardless of the configured default.
+        c.ecosystem ?? ecosystem,
         c.name,
         c.fromVersion,
         c.toVersion,
@@ -27026,14 +27162,14 @@ async function run() {
       };
     }
   });
-  const body = renderComment(analyses);
+  const report = renderComment(analyses);
   const level = highestLevel(analyses);
   const securityCount = analyses.reduce((n, a) => n + (a.securityFixes?.length ?? 0), 0);
   core.setOutput("highest-level", level);
   core.setOutput("security-count", String(securityCount));
-  core.setOutput("summary", body);
-  await core.summary.addRaw(body).write();
-  if (shouldComment) await upsertComment(token, pr.number, body);
+  core.setOutput("summary", report);
+  await core.summary.addRaw(report).write();
+  if (shouldComment) await upsertComment(token, pr.number, report);
   if (failOn !== "none") {
     const threshold = ORDER.indexOf(failOn);
     if (threshold === -1) {

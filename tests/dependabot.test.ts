@@ -113,6 +113,13 @@ describe("isDependencyBot", () => {
 		assert.equal(isDependencyBot("renovate-bot"), true);
 	});
 
+	// The webhook payload says `dependabot[bot]`; GitHub's GraphQL API (and `gh`)
+	// say `app/dependabot` for the same account.
+	it("recognises the GraphQL app/ form", () => {
+		assert.equal(isDependencyBot("app/dependabot"), true);
+		assert.equal(isDependencyBot("app/renovate"), true);
+	});
+
 	it("ignores a human author", () => {
 		assert.equal(isDependencyBot("kaustubhdgr8"), false);
 	});

@@ -13,7 +13,7 @@
 	"dependencies": {
 		"@actions/core": "^1.11.1",
 		"@actions/github": "^6.0.1",
-		"@digicatalyst/dep-diff-mcp": "^0.2.4"
+		"@digicatalyst/dep-diff-mcp": "^0.3.0"
 	},
 	"devDependencies": {
 		"@types/node": "^26.4.0",
