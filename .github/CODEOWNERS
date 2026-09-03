@@ -1,0 +1,14 @@
+# Default reviewer for all files
+* @kaustubhdgr8
+
+# Files that change what runs on a consumer's runner.
+# action.yml names the entrypoint and runtime; src/ is what dist/ is built from.
+/action.yml @kaustubhdgr8
+/src/ @kaustubhdgr8
+/.github/ @kaustubhdgr8
+/package.json @kaustubhdgr8
+
+# dist/ is a 1.1MB generated bundle and is not reviewable by reading the diff.
+# CI rebuilds it from src/ and fails on drift, which is what makes reviewing
+# src/ sufficient. Listed here only so an unexpected change still needs a look.
+/dist/ @kaustubhdgr8
