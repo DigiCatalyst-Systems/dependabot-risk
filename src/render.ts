@@ -36,8 +36,39 @@ const URGENCY: Record<string, string> = {
 };
 
 const FOOTER =
-	"<sub>Ranked by what the release notes and advisories actually say, not by semver. " +
-	"Powered by [dep-diff](https://github.com/DigiCatalyst-Systems/dep-diff-mcp).</sub>";
+	"<sub>[Dependabot Risk Report](https://github.com/marketplace/actions/dependabot-risk-report) " +
+	"by DigiCatalyst Systems · ranked by what the release notes and advisories actually say, " +
+	"not by semver · powered by " +
+	"[dep-diff-mcp](https://github.com/DigiCatalyst-Systems/dep-diff-mcp).</sub>";
+
+/**
+ * Heading for the job summary only. The pull request comment must lead with the
+ * verdict -- a banner above it is a line the reader has to skip before reaching
+ * the point. A job summary has no such competition, so it can be labelled.
+ */
+export const SUMMARY_HEADING =
+	"## 🛡️ Dependabot Risk Report\n\n" +
+	"<sub>by DigiCatalyst Systems · " +
+	"[install it](https://github.com/marketplace/actions/dependabot-risk-report)</sub>";
+
+/** GitHub rejects a comment body over 65536 characters. Leave room for the notice. */
+export const MAX_COMMENT_CHARS = 60000;
+
+/**
+ * A rejected comment is turned into a warning by the caller, so an oversized
+ * report would disappear without ever being read. Trim it and say where the
+ * whole thing is instead.
+ */
+export function capForComment(body: string): string {
+	if (body.length <= MAX_COMMENT_CHARS) return body;
+	const notice =
+		"\n\n<sub>Report truncated — it exceeded GitHub's comment size limit. " +
+		"The full report is in the job summary.</sub>";
+	return body.slice(0, MAX_COMMENT_CHARS - notice.length) + notice;
+}
+
+/** How many nested changes the grouped view shows before collapsing the rest. */
+const GROUPED_VISIBLE = 3;
 
 export function highestLevel(analyses: Analyzed[]): string {
 	if (analyses.length === 0) return "safe";
@@ -197,12 +228,20 @@ function grouped(attention: Analyzed[], routine: Analyzed[], total: number): str
 				`- \`${a.package}\` ${a.fromVersion} → ${a.toVersion} — ${a.breakingChanges!.length} breaking change` +
 					`${a.breakingChanges!.length === 1 ? "" : "s"}${link ? ` · [migration guide](${link})` : ""}`
 			);
-			const shown = a.breakingChanges!.slice(0, 3);
+			// Claiming six and listing three is the failure this report exists to
+			// avoid, and "…and 3 more" with nowhere to see them is only half a fix.
+			// The cap keeps the grouped view scannable; the expander keeps every
+			// change reachable. <details> renders in a pull request comment and in
+			// a job summary alike -- the blank line after </summary> is what lets
+			// the markdown inside it render.
+			const shown = a.breakingChanges!.slice(0, GROUPED_VISIBLE);
 			for (const b of shown) out.push(`  - ${b}`);
-			const hidden = a.breakingChanges!.length - shown.length;
-			// Claiming five and listing three, silently, is the failure this whole
-			// report exists to avoid.
-			if (hidden > 0) out.push(`  - …and ${hidden} more`);
+			const rest = a.breakingChanges!.slice(GROUPED_VISIBLE);
+			if (rest.length > 0) {
+				out.push(`  <details><summary>…and ${rest.length} more</summary>`, "");
+				for (const b of rest) out.push(`  - ${b}`);
+				out.push("  </details>");
+			}
 		}
 		out.push("");
 	}

@@ -3,7 +3,14 @@ import * as github from "@actions/github";
 import { analyzePackageChange } from "@digicatalyst/dep-diff-mcp/dist/analyzer.js";
 import { isDependencyBot, parseDependabotPr, type Ecosystem } from "./dependabot.ts";
 import { parseRenovatePr } from "./renovate.ts";
-import { COMMENT_MARKER, highestLevel, renderComment, type Analyzed } from "./render.ts";
+import {
+	COMMENT_MARKER,
+	capForComment,
+	highestLevel,
+	renderComment,
+	SUMMARY_HEADING,
+	type Analyzed,
+} from "./render.ts";
 
 const ORDER = ["security", "caution", "review", "likely-safe", "safe"];
 const CONCURRENCY = 8;
@@ -94,9 +101,16 @@ export async function run(): Promise<void> {
 	core.setOutput("highest-level", level);
 	core.setOutput("security-count", String(securityCount));
 	core.setOutput("summary", report);
-	await core.summary.addRaw(report).write();
+	await core.summary.addRaw(`${SUMMARY_HEADING}\n\n${report}`).write();
 
-	if (shouldComment) await upsertComment(token, pr.number, report);
+	// The log is the one surface that cannot be blocked by a fork's read-only
+	// token or trimmed by GitHub's comment size limit, so the whole report goes
+	// here unconditionally. Grouped, so it collapses by default.
+	core.startGroup("Risk report");
+	core.info(report);
+	core.endGroup();
+
+	if (shouldComment) await upsertComment(token, pr.number, capForComment(report));
 
 	if (failOn !== "none") {
 		const threshold = ORDER.indexOf(failOn);

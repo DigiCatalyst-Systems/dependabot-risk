@@ -21630,6 +21630,9 @@ function issueCommand(command, properties, message) {
   const cmd = new Command(command, properties, message);
   process.stdout.write(cmd.toString() + os.EOL);
 }
+function issue(name, message = "") {
+  issueCommand(name, {}, message);
+}
 var CMD_STRING = "::";
 var Command = class {
   constructor(command, properties, message) {
@@ -22104,6 +22107,12 @@ function warning(message, properties = {}) {
 }
 function info(message) {
   process.stdout.write(message + os4.EOL);
+}
+function startGroup(name) {
+  issue("group", name);
+}
+function endGroup() {
+  issue("endgroup");
 }
 
 // node_modules/@actions/github/lib/context.js
@@ -27319,7 +27328,15 @@ var URGENCY = {
   MEDIUM: "worth fixing",
   LOW: "minor"
 };
-var FOOTER = "<sub>Ranked by what the release notes and advisories actually say, not by semver. Powered by [dep-diff](https://github.com/DigiCatalyst-Systems/dep-diff-mcp).</sub>";
+var FOOTER = "<sub>[Dependabot Risk Report](https://github.com/marketplace/actions/dependabot-risk-report) by DigiCatalyst Systems \xB7 ranked by what the release notes and advisories actually say, not by semver \xB7 powered by [dep-diff-mcp](https://github.com/DigiCatalyst-Systems/dep-diff-mcp).</sub>";
+var SUMMARY_HEADING = "## \u{1F6E1}\uFE0F Dependabot Risk Report\n\n<sub>by DigiCatalyst Systems \xB7 [install it](https://github.com/marketplace/actions/dependabot-risk-report)</sub>";
+var MAX_COMMENT_CHARS = 6e4;
+function capForComment(body) {
+  if (body.length <= MAX_COMMENT_CHARS) return body;
+  const notice = "\n\n<sub>Report truncated \u2014 it exceeded GitHub's comment size limit. The full report is in the job summary.</sub>";
+  return body.slice(0, MAX_COMMENT_CHARS - notice.length) + notice;
+}
+var GROUPED_VISIBLE = 3;
 function highestLevel(analyses) {
   if (analyses.length === 0) return "safe";
   return analyses.reduce((worst, a) => rank(a) < rank(worst) ? a : worst).recommendationLevel;
@@ -27441,10 +27458,14 @@ function grouped(attention, routine, total) {
       out.push(
         `- \`${a.package}\` ${a.fromVersion} \u2192 ${a.toVersion} \u2014 ${a.breakingChanges.length} breaking change${a.breakingChanges.length === 1 ? "" : "s"}${link ? ` \xB7 [migration guide](${link})` : ""}`
       );
-      const shown = a.breakingChanges.slice(0, 3);
+      const shown = a.breakingChanges.slice(0, GROUPED_VISIBLE);
       for (const b of shown) out.push(`  - ${b}`);
-      const hidden = a.breakingChanges.length - shown.length;
-      if (hidden > 0) out.push(`  - \u2026and ${hidden} more`);
+      const rest = a.breakingChanges.slice(GROUPED_VISIBLE);
+      if (rest.length > 0) {
+        out.push(`  <details><summary>\u2026and ${rest.length} more</summary>`, "");
+        for (const b of rest) out.push(`  - ${b}`);
+        out.push("  </details>");
+      }
     }
     out.push("");
   }
@@ -27551,8 +27572,13 @@ async function run() {
   setOutput("highest-level", level);
   setOutput("security-count", String(securityCount));
   setOutput("summary", report);
-  await summary.addRaw(report).write();
-  if (shouldComment) await upsertComment(token, pr.number, report);
+  await summary.addRaw(`${SUMMARY_HEADING}
+
+${report}`).write();
+  startGroup("Risk report");
+  info(report);
+  endGroup();
+  if (shouldComment) await upsertComment(token, pr.number, capForComment(report));
   if (failOn !== "none") {
     const threshold = ORDER.indexOf(failOn);
     if (threshold === -1) {
