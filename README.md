@@ -9,17 +9,54 @@ packages in a PR by real risk.
 
 ## What it looks like
 
-> ### Dependabot Risk Report
->
-> **1 package of 2 needs a look** — **2 security fixes** (1 high/critical).
->
-> | Package | Change | Class | Verdict |
-> |---|---|---|---|
-> | `lodash` | 4.17.20 → 4.17.21 | patch | 🔴 2 security fixes (HIGH) |
-> | `esbuild` | 0.28.1 → 0.28.2 | patch | 🟢 SAFE: Patch-level change. |
+Most of the time, reassurance:
 
-Note the ordering: the `patch` bump outranks everything else, because it closes a
-**HIGH-severity command injection**. That is the case this action exists for.
+> ### ✅ Nothing to worry about
+>
+> Checked `esbuild` 0.28.1 → 0.28.2. No security advisories affecting you, and no breaking changes in the release notes.
+
+When a routine-looking patch is hiding something:
+
+> ### 🔴 Merge this — it closes 2 security holes
+>
+> `lodash` 4.17.20 → 4.17.21 is a patch bump, but your current version is exposed to:
+>
+> - **Command Injection** — HIGH, fix soon
+> - **Regular Expression Denial of Service (ReDoS)** — MODERATE, worth fixing
+>
+> Nothing else changes. Safe to merge as is.
+
+**This is the case the action exists for.** Dependabot surfaces advisory
+information on *security* updates. On a routine scheduled version bump it does
+not — so a patch that happens to close a command injection looks like any other
+patch.
+
+When something will actually break:
+
+> ### ⚠️ Read before merging — 2 things change
+>
+> `express` 4.18.2 → 5.0.0
+>
+> **What breaks**
+> - `req.param()` has been removed — use `req.params`
+> - Node.js 18 or higher is required
+>
+> Your tests may not catch these — they change behaviour, not syntax.
+>
+> [Migration guide →](https://expressjs.com/en/guide/migrating-5.html)
+
+And for a grouped PR, which is where triage actually costs you time:
+
+> ### 2 of 5 updates need a look
+>
+> **🔴 Merge first**
+> - `lodash` 4.17.20 → 4.17.21 — closes **Command Injection** (HIGH, fix soon) and 1 more
+>
+> **⚠️ Read first**
+> - `express` 4.18.2 → 5.0.0 — 2 breaking changes · [migration guide]
+>
+> **✅ Routine** — no advisories, no breaking changes
+> `esbuild`, `tsx`, `zod`
 
 ## Usage
 

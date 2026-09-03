@@ -4272,8 +4272,8 @@ var require_webidl = __commonJS({
       return new TypeError(`${message.header}: ${message.message}`);
     };
     webidl.errors.conversionFailed = function(context2) {
-      const plural2 = context2.types.length === 1 ? "" : " one of";
-      const message = `${context2.argument} could not be converted to${plural2}: ${context2.types.join(", ")}.`;
+      const plural = context2.types.length === 1 ? "" : " one of";
+      const message = `${context2.argument} could not be converted to${plural}: ${context2.types.join(", ")}.`;
       return webidl.errors.exception({
         header: context2.prefix,
         message
@@ -10875,9 +10875,9 @@ var require_pluralizer = __commonJS({
       this: "these"
     };
     module.exports = class Pluralizer {
-      constructor(singular, plural2) {
+      constructor(singular, plural) {
         this.singular = singular;
-        this.plural = plural2;
+        this.plural = plural;
       }
       pluralize(count) {
         const one = count === 1;
@@ -18303,8 +18303,8 @@ var require_summary = __commonJS({
        * @returns {Summary} summary instance
        */
       addTable(rows) {
-        const tableBody = rows.map((row2) => {
-          const cells = row2.map((cell) => {
+        const tableBody = rows.map((row) => {
+          const cells = row.map((cell) => {
             if (typeof cell === "string") {
               return this.wrap("td", cell);
             }
@@ -26832,85 +26832,147 @@ var RANK = {
   "likely-safe": 3,
   safe: 4
 };
-var BADGE = {
-  security: "\u{1F534}",
-  caution: "\u{1F7E0}",
-  review: "\u{1F7E1}",
-  "likely-safe": "\u{1F7E2}",
-  safe: "\u{1F7E2}"
-};
 var rank = (a) => RANK[a.recommendationLevel] ?? RANK.review;
+var needsAttention = (a) => rank(a) <= RANK.review;
+var URGENCY = {
+  CRITICAL: "fix urgently",
+  HIGH: "fix soon",
+  MODERATE: "worth fixing",
+  MEDIUM: "worth fixing",
+  LOW: "minor"
+};
+var FOOTER = "<sub>Ranked by what the release notes and advisories actually say, not by semver. Powered by [dep-diff](https://github.com/DigiCatalyst-Systems/dep-diff-mcp).</sub>";
 function highestLevel(analyses) {
   if (analyses.length === 0) return "safe";
   return analyses.reduce((worst, a) => rank(a) < rank(worst) ? a : worst).recommendationLevel;
 }
-var SEVERE = /* @__PURE__ */ new Set(["HIGH", "CRITICAL"]);
 function renderComment(analyses) {
   const sorted = [...analyses].sort((a, b) => rank(a) - rank(b));
-  const fixes = sorted.flatMap(
-    (a) => (a.securityFixes ?? []).map((f) => ({ pkg: a.package, ...f }))
+  const attention = sorted.filter(needsAttention);
+  const routine = sorted.filter((a) => !needsAttention(a));
+  const body = attention.length === 0 ? allClear(routine) : sorted.length === 1 ? single(sorted[0]) : grouped(attention, routine, sorted.length);
+  return [COMMENT_MARKER, ...body, "", FOOTER].join("\n");
+}
+function allClear(routine) {
+  const names = routine.map((a) => `\`${a.package}\``).join(", ");
+  const what = routine.length === 1 ? `${names} ${routine[0].fromVersion} \u2192 ${routine[0].toVersion}` : `all ${routine.length} updates`;
+  return [
+    "### \u2705 Nothing to worry about",
+    "",
+    `Checked ${what}. No security advisories affecting you, and no breaking changes in the release notes.`,
+    ...routine.length > 1 ? ["", names] : []
+  ];
+}
+function single(a) {
+  if (a.error) {
+    return [
+      "### \u{1F7E1} Could not check this update",
+      "",
+      `\`${a.package}\` \u2014 ${a.error}`,
+      "",
+      "Nothing is necessarily wrong; the analysis just could not complete. Review it by hand."
+    ];
+  }
+  const out = [];
+  const fixes = a.securityFixes ?? [];
+  const breaks = a.breakingChanges ?? [];
+  if (fixes.length > 0) {
+    out.push(
+      fixes.length === 1 ? "### \u{1F534} Merge this \u2014 it closes a security hole" : `### \u{1F534} Merge this \u2014 it closes ${fixes.length} security holes`,
+      "",
+      `\`${a.package}\` ${a.fromVersion} \u2192 ${a.toVersion} is a ${a.semverClass} bump, but your current version is exposed to:`,
+      "",
+      ...fixes.map((f) => `- **${cleanSummary(f, a.package)}** \u2014 ${urgency(f.severity)}`)
+    );
+    if (breaks.length === 0) out.push("", "Nothing else changes. Safe to merge as is.");
+  }
+  if (breaks.length > 0) {
+    if (out.length > 0) out.push("");
+    out.push(
+      `### \u26A0\uFE0F Read before merging \u2014 ${breaks.length} thing${breaks.length === 1 ? "" : "s"} change${breaks.length === 1 ? "s" : ""}`,
+      "",
+      `\`${a.package}\` ${a.fromVersion} \u2192 ${a.toVersion}`,
+      "",
+      "**What breaks**",
+      ...breaks.map((b) => `- ${b}`),
+      "",
+      "Your tests may not catch these \u2014 they change behaviour, not syntax."
+    );
+    for (const link of a.migrationLinks ?? []) out.push("", `[Migration guide \u2192](${link})`);
+  }
+  if (out.length === 0) {
+    out.push(
+      "### \u{1F7E1} Worth a look before merging",
+      "",
+      `\`${a.package}\` ${a.fromVersion} \u2192 ${a.toVersion} \u2014 ${a.recommendation ?? "review recommended"}`
+    );
+  }
+  return out;
+}
+function grouped(attention, routine, total) {
+  const out = [
+    `### ${attention.length} of ${total} update${total === 1 ? "" : "s"} need${attention.length === 1 ? "s" : ""} a look`,
+    ""
+  ];
+  const security = attention.filter((a) => (a.securityFixes?.length ?? 0) > 0);
+  const breaking = attention.filter(
+    (a) => (a.breakingChanges?.length ?? 0) > 0 && (a.securityFixes?.length ?? 0) === 0
   );
-  const severe = fixes.filter((f) => SEVERE.has(f.severity.toUpperCase()));
-  const breaking = sorted.filter((a) => (a.breakingChanges?.length ?? 0) > 0);
-  const needsLook = sorted.filter((a) => rank(a) <= RANK.review);
-  const lines = [COMMENT_MARKER, "### Dependabot Risk Report", ""];
-  if (needsLook.length === 0) {
-    lines.push(`Nothing here needs a closer look \u2014 ${plural(sorted.length, "package")}, no security fixes and no breaking changes found.`, "");
-  } else {
-    const bits = [];
-    if (fixes.length > 0) {
-      bits.push(
-        severe.length > 0 ? `**${plural(fixes.length, "security fix", "security fixes")}** (${severe.length} high/critical)` : `**${plural(fixes.length, "security fix", "security fixes")}**`
+  const unclear = attention.filter((a) => a.error);
+  const other = attention.filter(
+    (a) => !security.includes(a) && !breaking.includes(a) && !unclear.includes(a)
+  );
+  if (security.length > 0) {
+    out.push("**\u{1F534} Merge first**");
+    for (const a of security) {
+      const worst = (a.securityFixes ?? [])[0];
+      const extra = (a.securityFixes ?? []).length - 1;
+      out.push(
+        `- \`${a.package}\` ${a.fromVersion} \u2192 ${a.toVersion} \u2014 closes **${cleanSummary(worst, a.package)}** (${urgency(worst.severity)})${extra > 0 ? ` and ${extra} more` : ""}`
       );
     }
-    if (breaking.length > 0) bits.push(`breaking changes in ${plural(breaking.length, "package")}`);
-    const detail = bits.length > 0 ? ` \u2014 ${bits.join(", ")}` : "";
-    lines.push(`**${plural(needsLook.length, "package")} of ${sorted.length} need${needsLook.length === 1 ? "s" : ""} a look**${detail}.`, "");
-  }
-  lines.push("| Package | Change | Class | Verdict |", "|---|---|---|---|");
-  for (const a of sorted) lines.push(row(a));
-  lines.push("");
-  if (fixes.length > 0) {
-    lines.push("<details><summary>Security advisories fixed in this range</summary>", "");
-    for (const f of fixes) {
-      lines.push(`- \`${f.pkg}\` \u2014 **${f.severity.toUpperCase()}** [${f.id}](https://github.com/advisories/${f.id}): ${f.summary}`);
-    }
-    lines.push("", "</details>", "");
+    out.push("");
   }
   if (breaking.length > 0) {
-    lines.push("<details><summary>Breaking changes from release notes</summary>", "");
+    out.push("**\u26A0\uFE0F Read first**");
     for (const a of breaking) {
-      lines.push(`**${a.package}** ${a.fromVersion} \u2192 ${a.toVersion}`);
-      for (const b of a.breakingChanges) lines.push(`- ${b}`);
-      for (const link of a.migrationLinks ?? []) lines.push(`- Migration guide: ${link}`);
-      lines.push("");
+      const link = (a.migrationLinks ?? [])[0];
+      out.push(
+        `- \`${a.package}\` ${a.fromVersion} \u2192 ${a.toVersion} \u2014 ${a.breakingChanges.length} breaking change${a.breakingChanges.length === 1 ? "" : "s"}${link ? ` \xB7 [migration guide](${link})` : ""}`
+      );
+      for (const b of a.breakingChanges.slice(0, 3)) out.push(`  - ${b}`);
     }
-    lines.push("</details>", "");
+    out.push("");
   }
-  lines.push(
-    "<sub>Ranked by what the release notes and advisories actually say, not by semver. Powered by [dep-diff](https://github.com/DigiCatalyst-Systems/dep-diff-mcp).</sub>"
-  );
-  return lines.join("\n");
+  for (const [heading, group] of [
+    ["**\u{1F7E1} Worth a look**", other],
+    ["**\u{1F7E1} Could not check**", unclear]
+  ]) {
+    if (group.length === 0) continue;
+    out.push(heading);
+    for (const a of group) {
+      out.push(
+        a.error ? `- \`${a.package}\` \u2014 ${a.error}` : `- \`${a.package}\` ${a.fromVersion} \u2192 ${a.toVersion} \u2014 ${a.recommendation ?? "review recommended"}`
+      );
+    }
+    out.push("");
+  }
+  if (routine.length > 0) {
+    out.push(
+      "**\u2705 Routine** \u2014 no advisories, no breaking changes",
+      routine.map((a) => `\`${a.package}\``).join(", ")
+    );
+  }
+  return out;
 }
-function row(a) {
-  const badge = BADGE[a.recommendationLevel] ?? "\u{1F7E1}";
-  if (a.error) {
-    return `| \`${a.package}\` | \u2014 | \u2014 | ${badge} **Could not analyze** \u2014 ${a.error} |`;
-  }
-  const change = `${a.fromVersion} \u2192 ${a.toVersion}`;
-  const notes = [];
-  const n = a.securityFixes?.length ?? 0;
-  if (n > 0) {
-    const worst = (a.securityFixes ?? []).map((f) => f.severity.toUpperCase()).find((s) => SEVERE.has(s));
-    notes.push(`${plural(n, "security fix", "security fixes")}${worst ? ` (${worst})` : ""}`);
-  }
-  const b = a.breakingChanges?.length ?? 0;
-  if (b > 0) notes.push(`${plural(b, "breaking change")}`);
-  const verdict = notes.length > 0 ? notes.join(", ") : (a.recommendation ?? "").replace(/\s+/g, " ");
-  return `| \`${a.package}\` | ${change} | ${a.semverClass ?? "\u2014"} | ${badge} ${verdict} |`;
+function cleanSummary(f, pkg) {
+  const escaped = pkg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return f.summary.replace(new RegExp(`\\s+in\\s+${escaped}\\s*$`, "i"), "").trim();
 }
-function plural(n, one, many = `${one}s`) {
-  return `${n} ${n === 1 ? one : many}`;
+function urgency(severity) {
+  const s = severity.toUpperCase();
+  const plain = URGENCY[s];
+  return plain ? `${s}, ${plain}` : s;
 }
 
 // src/main.ts

@@ -21,107 +21,187 @@ export type Analyzed = {
 export const COMMENT_MARKER = "<!-- dependabot-risk -->";
 
 const RANK: Record<string, number> = {
-	security: 0,
-	caution: 1,
-	review: 2,
-	"likely-safe": 3,
-	safe: 4,
+	security: 0, caution: 1, review: 2, "likely-safe": 3, safe: 4,
 };
-
-const BADGE: Record<string, string> = {
-	security: "🔴",
-	caution: "🟠",
-	review: "🟡",
-	"likely-safe": "🟢",
-	safe: "🟢",
-};
-
 const rank = (a: Analyzed) => RANK[a.recommendationLevel] ?? RANK.review!;
+const needsAttention = (a: Analyzed) => rank(a) <= RANK.review!;
+
+/** Severity labels mean little to a non-expert. Translate them into urgency. */
+const URGENCY: Record<string, string> = {
+	CRITICAL: "fix urgently",
+	HIGH: "fix soon",
+	MODERATE: "worth fixing",
+	MEDIUM: "worth fixing",
+	LOW: "minor",
+};
+
+const FOOTER =
+	"<sub>Ranked by what the release notes and advisories actually say, not by semver. " +
+	"Powered by [dep-diff](https://github.com/DigiCatalyst-Systems/dep-diff-mcp).</sub>";
 
 export function highestLevel(analyses: Analyzed[]): string {
 	if (analyses.length === 0) return "safe";
 	return analyses.reduce((worst, a) => (rank(a) < rank(worst) ? a : worst)).recommendationLevel;
 }
 
-const SEVERE = new Set(["HIGH", "CRITICAL"]);
-
 export function renderComment(analyses: Analyzed[]): string {
 	const sorted = [...analyses].sort((a, b) => rank(a) - rank(b));
-	const fixes = sorted.flatMap((a) =>
-		(a.securityFixes ?? []).map((f) => ({ pkg: a.package, ...f }))
-	);
-	const severe = fixes.filter((f) => SEVERE.has(f.severity.toUpperCase()));
-	const breaking = sorted.filter((a) => (a.breakingChanges?.length ?? 0) > 0);
-	const needsLook = sorted.filter((a) => rank(a) <= RANK.review!);
+	const attention = sorted.filter(needsAttention);
+	const routine = sorted.filter((a) => !needsAttention(a));
 
-	const lines: string[] = [COMMENT_MARKER, "### Dependabot Risk Report", ""];
+	const body =
+		attention.length === 0
+			? allClear(routine)
+			: sorted.length === 1
+				? single(sorted[0]!)
+				: grouped(attention, routine, sorted.length);
 
-	if (needsLook.length === 0) {
-		lines.push(`Nothing here needs a closer look — ${plural(sorted.length, "package")}, no security fixes and no breaking changes found.`, "");
-	} else {
-		const bits: string[] = [];
-		if (fixes.length > 0) {
-			bits.push(
-				severe.length > 0
-					? `**${plural(fixes.length, "security fix", "security fixes")}** (${severe.length} high/critical)`
-					: `**${plural(fixes.length, "security fix", "security fixes")}**`
-			);
-		}
-		if (breaking.length > 0) bits.push(`breaking changes in ${plural(breaking.length, "package")}`);
-		const detail = bits.length > 0 ? ` — ${bits.join(", ")}` : "";
-		lines.push(`**${plural(needsLook.length, "package")} of ${sorted.length} need${needsLook.length === 1 ? "s" : ""} a look**${detail}.`, "");
+	return [COMMENT_MARKER, ...body, "", FOOTER].join("\n");
+}
+
+/** The reassurance case. Says what was checked so silence reads as work, not absence. */
+function allClear(routine: Analyzed[]): string[] {
+	const names = routine.map((a) => `\`${a.package}\``).join(", ");
+	const what =
+		routine.length === 1
+			? `${names} ${routine[0]!.fromVersion} → ${routine[0]!.toVersion}`
+			: `all ${routine.length} updates`;
+	return [
+		"### ✅ Nothing to worry about",
+		"",
+		`Checked ${what}. No security advisories affecting you, and no breaking changes in the release notes.`,
+		...(routine.length > 1 ? ["", names] : []),
+	];
+}
+
+function single(a: Analyzed): string[] {
+	if (a.error) {
+		return [
+			"### 🟡 Could not check this update",
+			"",
+			`\`${a.package}\` — ${a.error}`,
+			"",
+			"Nothing is necessarily wrong; the analysis just could not complete. Review it by hand.",
+		];
 	}
 
-	lines.push("| Package | Change | Class | Verdict |", "|---|---|---|---|");
-	for (const a of sorted) lines.push(row(a));
-	lines.push("");
+	const out: string[] = [];
+	const fixes = a.securityFixes ?? [];
+	const breaks = a.breakingChanges ?? [];
 
 	if (fixes.length > 0) {
-		lines.push("<details><summary>Security advisories fixed in this range</summary>", "");
-		for (const f of fixes) {
-			lines.push(`- \`${f.pkg}\` — **${f.severity.toUpperCase()}** [${f.id}](https://github.com/advisories/${f.id}): ${f.summary}`);
+		out.push(
+			fixes.length === 1
+				? "### 🔴 Merge this — it closes a security hole"
+				: `### 🔴 Merge this — it closes ${fixes.length} security holes`,
+			"",
+			`\`${a.package}\` ${a.fromVersion} → ${a.toVersion} is a ${a.semverClass} bump, ` +
+				"but your current version is exposed to:",
+			"",
+			...fixes.map((f) => `- **${cleanSummary(f, a.package)}** — ${urgency(f.severity)}`)
+		);
+		if (breaks.length === 0) out.push("", "Nothing else changes. Safe to merge as is.");
+	}
+
+	if (breaks.length > 0) {
+		if (out.length > 0) out.push("");
+		out.push(
+			`### ⚠️ Read before merging — ${breaks.length} thing${breaks.length === 1 ? "" : "s"} change${breaks.length === 1 ? "s" : ""}`,
+			"",
+			`\`${a.package}\` ${a.fromVersion} → ${a.toVersion}`,
+			"",
+			"**What breaks**",
+			...breaks.map((b) => `- ${b}`),
+			"",
+			"Your tests may not catch these — they change behaviour, not syntax."
+		);
+		for (const link of a.migrationLinks ?? []) out.push("", `[Migration guide →](${link})`);
+	}
+
+	if (out.length === 0) {
+		out.push(
+			"### 🟡 Worth a look before merging",
+			"",
+			`\`${a.package}\` ${a.fromVersion} → ${a.toVersion} — ${a.recommendation ?? "review recommended"}`
+		);
+	}
+	return out;
+}
+
+function grouped(attention: Analyzed[], routine: Analyzed[], total: number): string[] {
+	const out = [
+		`### ${attention.length} of ${total} update${total === 1 ? "" : "s"} need${attention.length === 1 ? "s" : ""} a look`,
+		"",
+	];
+
+	const security = attention.filter((a) => (a.securityFixes?.length ?? 0) > 0);
+	const breaking = attention.filter(
+		(a) => (a.breakingChanges?.length ?? 0) > 0 && (a.securityFixes?.length ?? 0) === 0
+	);
+	const unclear = attention.filter((a) => a.error);
+	const other = attention.filter(
+		(a) => !security.includes(a) && !breaking.includes(a) && !unclear.includes(a)
+	);
+
+	if (security.length > 0) {
+		out.push("**🔴 Merge first**");
+		for (const a of security) {
+			const worst = (a.securityFixes ?? [])[0]!;
+			const extra = (a.securityFixes ?? []).length - 1;
+			out.push(
+				`- \`${a.package}\` ${a.fromVersion} → ${a.toVersion} — closes **${cleanSummary(worst, a.package)}** ` +
+					`(${urgency(worst.severity)})${extra > 0 ? ` and ${extra} more` : ""}`
+			);
 		}
-		lines.push("", "</details>", "");
+		out.push("");
 	}
 
 	if (breaking.length > 0) {
-		lines.push("<details><summary>Breaking changes from release notes</summary>", "");
+		out.push("**⚠️ Read first**");
 		for (const a of breaking) {
-			lines.push(`**${a.package}** ${a.fromVersion} → ${a.toVersion}`);
-			for (const b of a.breakingChanges!) lines.push(`- ${b}`);
-			for (const link of a.migrationLinks ?? []) lines.push(`- Migration guide: ${link}`);
-			lines.push("");
+			const link = (a.migrationLinks ?? [])[0];
+			out.push(
+				`- \`${a.package}\` ${a.fromVersion} → ${a.toVersion} — ${a.breakingChanges!.length} breaking change` +
+					`${a.breakingChanges!.length === 1 ? "" : "s"}${link ? ` · [migration guide](${link})` : ""}`
+			);
+			for (const b of a.breakingChanges!.slice(0, 3)) out.push(`  - ${b}`);
 		}
-		lines.push("</details>", "");
+		out.push("");
 	}
 
-	lines.push(
-		"<sub>Ranked by what the release notes and advisories actually say, not by semver. " +
-			"Powered by [dep-diff](https://github.com/DigiCatalyst-Systems/dep-diff-mcp).</sub>"
-	);
-	return lines.join("\n");
+	for (const [heading, group] of [
+		["**🟡 Worth a look**", other],
+		["**🟡 Could not check**", unclear],
+	] as const) {
+		if (group.length === 0) continue;
+		out.push(heading);
+		for (const a of group) {
+			out.push(
+				a.error
+					? `- \`${a.package}\` — ${a.error}`
+					: `- \`${a.package}\` ${a.fromVersion} → ${a.toVersion} — ${a.recommendation ?? "review recommended"}`
+			);
+		}
+		out.push("");
+	}
+
+	if (routine.length > 0) {
+		out.push(
+			"**✅ Routine** — no advisories, no breaking changes",
+			routine.map((a) => `\`${a.package}\``).join(", ")
+		);
+	}
+	return out;
 }
 
-function row(a: Analyzed): string {
-	const badge = BADGE[a.recommendationLevel] ?? "🟡";
-	if (a.error) {
-		return `| \`${a.package}\` | — | — | ${badge} **Could not analyze** — ${a.error} |`;
-	}
-	const change = `${a.fromVersion} → ${a.toVersion}`;
-	const notes: string[] = [];
-	const n = a.securityFixes?.length ?? 0;
-	if (n > 0) {
-		const worst = (a.securityFixes ?? [])
-			.map((f) => f.severity.toUpperCase())
-			.find((s) => SEVERE.has(s));
-		notes.push(`${plural(n, "security fix", "security fixes")}${worst ? ` (${worst})` : ""}`);
-	}
-	const b = a.breakingChanges?.length ?? 0;
-	if (b > 0) notes.push(`${plural(b, "breaking change")}`);
-	const verdict = notes.length > 0 ? notes.join(", ") : (a.recommendation ?? "").replace(/\s+/g, " ");
-	return `| \`${a.package}\` | ${change} | ${a.semverClass ?? "—"} | ${badge} ${verdict} |`;
+/** "Command Injection in lodash" reads badly next to a lodash label. */
+function cleanSummary(f: SecurityFix, pkg: string): string {
+	const escaped = pkg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	return f.summary.replace(new RegExp(`\\s+in\\s+${escaped}\\s*$`, "i"), "").trim();
 }
 
-function plural(n: number, one: string, many = `${one}s`): string {
-	return `${n} ${n === 1 ? one : many}`;
+function urgency(severity: string): string {
+	const s = severity.toUpperCase();
+	const plain = URGENCY[s];
+	return plain ? `${s}, ${plain}` : s;
 }
