@@ -1,6 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { COMMENT_MARKER, renderComment, highestLevel, type Analyzed } from "../src/render.ts";
+import {
+	COMMENT_MARKER,
+	renderComment,
+	highestLevel,
+	capForComment,
+	MAX_COMMENT_CHARS,
+	SUMMARY_HEADING,
+	type Analyzed,
+} from "../src/render.ts";
 
 const base = { ecosystem: "npm", repoUrl: null, releaseCount: 0, migrationLinks: [] };
 
@@ -232,5 +240,109 @@ describe("whitespace", () => {
 			},
 		]);
 		assert.ok(!/\n\n\n/.test(out), JSON.stringify(out.slice(-200)));
+	});
+});
+
+describe("hidden changes stay reachable", () => {
+	const many = (n: number) =>
+		Array.from({ length: n }, (_, i) => `v2.0.0: breaking change number ${i + 1}`);
+	const pkgs = (n: number) => [
+		{
+			package: "zod",
+			fromVersion: "4.3.6",
+			toVersion: "4.5.2",
+			semverClass: "minor" as const,
+			recommendationLevel: "caution" as const,
+			securityFixes: [],
+			breakingChanges: many(n),
+		},
+		{
+			package: "express",
+			fromVersion: "4.18.2",
+			toVersion: "5.0.0",
+			semverClass: "major" as const,
+			recommendationLevel: "caution" as const,
+			securityFixes: [],
+			breakingChanges: ["v5.0.0: also broke"],
+		},
+	];
+
+	// "…and 3 more" with nowhere to see them is a tease. The job summary is the
+	// same string, so there was no second surface carrying the rest either.
+	it("puts the remainder in a details expander", () => {
+		const out = renderComment(pkgs(6));
+		assert.match(out, /<details><summary>…and 3 more<\/summary>/);
+		assert.match(out, /breaking change number 6/);
+	});
+
+	it("leaves a blank line after summary so the markdown inside renders", () => {
+		const out = renderComment(pkgs(6));
+		assert.match(out, /<summary>…and 3 more<\/summary>\n\n/);
+	});
+
+	it("closes the expander", () => {
+		const out = renderComment(pkgs(6));
+		assert.equal((out.match(/<details>/g) ?? []).length, (out.match(/<\/details>/g) ?? []).length);
+	});
+
+	it("adds no expander when everything already fits", () => {
+		const out = renderComment(pkgs(3));
+		assert.ok(!/<details>/.test(out), out);
+		assert.match(out, /breaking change number 3/);
+	});
+
+	it("never drops a change", () => {
+		const out = renderComment(pkgs(9));
+		for (let i = 1; i <= 9; i++) {
+			assert.match(out, new RegExp(`breaking change number ${i}\\b`), `missing change ${i}`);
+		}
+	});
+});
+
+describe("attribution", () => {
+	const one = [
+		{
+			package: "zod",
+			fromVersion: "4.3.6",
+			toVersion: "4.5.2",
+			semverClass: "patch" as const,
+			recommendationLevel: "safe" as const,
+			securityFixes: [],
+			breakingChanges: [],
+		},
+	];
+
+	it("names the action and links the marketplace listing", () => {
+		const out = renderComment(one);
+		assert.match(out, /\[Dependabot Risk Report\]\(https:\/\/github\.com\/marketplace\/actions\/dependabot-risk-report\)/);
+		assert.match(out, /DigiCatalyst Systems/);
+	});
+
+	it("spells the engine out rather than abbreviating it", () => {
+		const out = renderComment(one);
+		assert.match(out, /dep-diff-mcp/);
+	});
+
+	it("offers a heading for the job summary only", () => {
+		assert.match(SUMMARY_HEADING, /^## /);
+		assert.match(SUMMARY_HEADING, /Dependabot Risk Report/);
+		// The comment must still lead with the verdict, not a banner.
+		assert.ok(!renderComment(one).startsWith(SUMMARY_HEADING));
+	});
+});
+
+describe("capForComment", () => {
+	it("leaves a normal report untouched", () => {
+		const body = "### all clear\n\nnothing to see";
+		assert.equal(capForComment(body), body);
+	});
+
+	// GitHub rejects a comment over 65536 characters, and upsertComment turns the
+	// failure into a warning -- so an oversized report would vanish silently.
+	it("trims an oversized report and says so", () => {
+		const body = "x".repeat(MAX_COMMENT_CHARS + 5000);
+		const out = capForComment(body);
+		assert.ok(out.length <= MAX_COMMENT_CHARS, `still ${out.length}`);
+		assert.match(out, /job summary/i);
 	});
 });
