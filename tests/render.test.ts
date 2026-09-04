@@ -380,3 +380,48 @@ describe("per-package details block", () => {
 		assert.ok(!/<b>esbuild<\/b>/.test(out), out);
 	});
 });
+
+describe("dependency scope", () => {
+	it("tags a dev dependency after its name in the grouped table", () => {
+		const devEsbuild: Analyzed = { ...esbuild, scope: "dev" };
+		const out = renderComment([lodash, devEsbuild, tsx]);
+		assert.match(out, /`esbuild` 🔧dev/);
+	});
+
+	it("leaves a runtime dependency unmarked, because runtime is the default", () => {
+		const out = renderComment([lodash, { ...esbuild, scope: "runtime" }, tsx]);
+		assert.match(out, /`esbuild` \|/);
+		assert.doesNotMatch(out, /🔧|⚙️|📦/);
+	});
+
+	it("tags a github-actions bump as ci", () => {
+		const checkout: Analyzed = {
+			...esbuild, package: "actions/checkout", fromVersion: "4", toVersion: "7", scope: "ci",
+		};
+		const out = renderComment([lodash, checkout, tsx]);
+		assert.match(out, /`actions\/checkout` ⚙️ci/);
+	});
+
+	it("tags an indirect dependency", () => {
+		const out = renderComment([lodash, { ...esbuild, scope: "indirect" }, tsx]);
+		assert.match(out, /`esbuild` 📦indirect/);
+	});
+
+	it("says what a dev scope means beneath a single security finding", () => {
+		const out = renderComment([{ ...lodash, scope: "dev" }]);
+		assert.match(out, /build tooling/i);
+		assert.match(out, /run in CI with access to your tokens/i);
+	});
+
+	it("adds no scope note for a runtime security finding", () => {
+		const out = renderComment([{ ...lodash, scope: "runtime" }]);
+		assert.doesNotMatch(out, /build tooling/i);
+	});
+
+	// The guard on the whole feature: scope annotates, it never downranks.
+	it("still reports security for an advisory in a dev dependency", () => {
+		const devLodash: Analyzed = { ...lodash, scope: "dev" };
+		assert.equal(highestLevel([devLodash, esbuild]), "security");
+		assert.match(renderComment([devLodash, esbuild, tsx]), /🚨/);
+	});
+});

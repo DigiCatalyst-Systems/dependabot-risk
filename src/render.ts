@@ -1,3 +1,5 @@
+import type { Scope } from "./scope.ts";
+
 export type SecurityFix = { id: string; summary: string; severity: string };
 
 /** A successful analysis, or the in-place failure record for one that rejected. */
@@ -15,6 +17,8 @@ export type Analyzed = {
 	recommendation?: string;
 	recommendationLevel: string;
 	error?: string;
+	/** Annotation only -- deliberately absent from RANK and from packageMarker. */
+	scope?: Scope;
 };
 
 /** Lets the action find and update its own comment instead of posting a new one. */
@@ -33,6 +37,31 @@ const URGENCY: Record<string, string> = {
 	MODERATE: "worth fixing",
 	MEDIUM: "worth fixing",
 	LOW: "minor",
+};
+
+/**
+ * Runtime is the default and stays unmarked -- tagging every row would be a
+ * column of restatement. Only the exceptions are worth a reader's attention.
+ */
+const SCOPE_TAG: Partial<Record<Scope, string>> = {
+	dev: "\u{1F527}dev",
+	ci: "\u2699\uFE0Fci",
+	indirect: "\u{1F4E6}indirect",
+};
+
+/** Empty for runtime and for an untagged package, so the name stands alone. */
+const tagSuffix = (a: Analyzed) => {
+	const tag = a.scope ? SCOPE_TAG[a.scope] : undefined;
+	return tag ? ` ${tag}` : "";
+};
+
+/**
+ * Scope is context, never a downgrade: a build tool runs in CI holding the
+ * repository token, which is how the tj-actions/changed-files attack worked.
+ */
+const SCOPE_NOTE: Partial<Record<Scope, string>> = {
+	dev: "This is build tooling \u2014 it does not ship to production, but it does run in CI with access to your tokens.",
+	ci: "This runs in CI with access to your tokens.",
 };
 
 const FOOTER =
@@ -146,6 +175,8 @@ function single(a: Analyzed): string[] {
 			"",
 			...fixes.map((f) => `- **${cleanSummary(f, a.package)}** — ${urgency(f.severity)}`)
 		);
+		const note = a.scope ? SCOPE_NOTE[a.scope] : undefined;
+		if (note) out.push("", note);
 		if (breaks.length === 0) out.push("", "Nothing else changes. Safe to merge as is.");
 	}
 
@@ -216,7 +247,7 @@ function grouped(attention: Analyzed[], routine: Analyzed[], total: number): str
 	const all = [...attention, ...routine];
 	for (const a of all) {
 		const change = a.error ? "—" : `${a.fromVersion} → ${a.toVersion}`;
-		out.push(`| ${packageMarker(a)} | \`${a.package}\` | ${change} | ${cell(whatToKnow(a))} |`);
+		out.push(`| ${packageMarker(a)} | \`${a.package}\`${tagSuffix(a)} | ${change} | ${cell(whatToKnow(a))} |`);
 	}
 
 	for (const a of all) {
