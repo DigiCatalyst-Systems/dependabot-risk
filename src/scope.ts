@@ -57,3 +57,67 @@ export function parseDependabotScopes(commitMessages: string[]): Map<string, Sco
 	}
 	return out;
 }
+
+const RENOVATE_TYPE: Record<string, Scope> = {
+	dependencies: "runtime",
+	devdependencies: "dev",
+	// Peer and optional dependencies still ship to whoever installs the package.
+	peerdependencies: "runtime",
+	optionaldependencies: "runtime",
+	action: "ci",
+};
+
+/** `| a | b |` -> `["a", "b"]`. Returns nothing for a line that is not a row. */
+function cells(line: string): string[] {
+	const t = line.trim();
+	if (!t.startsWith("|")) return [];
+	return t.replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+}
+
+/** `[name](url) ([source](url))` -> `name`; a bare cell is its own name. */
+function nameFrom(cell: string): string {
+	const link = cell.match(/^\[([^\]]+)\]\([^)]*\)/);
+	return (link ? link[1]! : cell.replace(/\s*\(.*$/, "")).trim();
+}
+
+const HEADER_CELL = /^\[?([A-Za-z ]+)\]?/;
+const headerName = (cell: string) => (cell.match(HEADER_CELL)?.[1] ?? "").trim().toLowerCase();
+
+/**
+ * Renovate has no commit trailer, only an optional body column. Its position is
+ * not fixed -- `prBodyColumns` is user-configurable and merge-confidence badges
+ * displace it -- so the index is read from the header row rather than assumed.
+ * Most Renovate pull requests carry no Type column at all, which yields no
+ * entries rather than a guess.
+ */
+export function parseRenovateScopes(body: string | undefined): Map<string, Scope> {
+	const out = new Map<string, Scope>();
+	if (!body) return out;
+
+	let packageIdx = -1;
+	let typeIdx = -1;
+
+	for (const line of body.split("\n")) {
+		const row = cells(line);
+		if (row.length === 0) continue;
+
+		if (typeIdx === -1) {
+			const names = row.map(headerName);
+			const p = names.indexOf("package");
+			const t = names.indexOf("type");
+			if (p !== -1 && t !== -1) {
+				packageIdx = p;
+				typeIdx = t;
+			}
+			continue;
+		}
+
+		// The |---|---| separator directly under the header.
+		if (row.every((c) => /^:?-+:?$/.test(c))) continue;
+
+		const name = nameFrom(row[packageIdx] ?? "");
+		const scope = RENOVATE_TYPE[(row[typeIdx] ?? "").toLowerCase()];
+		if (name && scope) out.set(name, scope);
+	}
+	return out;
+}

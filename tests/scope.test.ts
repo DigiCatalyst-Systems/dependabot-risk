@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseDependabotScopes } from "../src/scope.ts";
+import { parseDependabotScopes, parseRenovateScopes } from "../src/scope.ts";
 
 // Fixtures are real Dependabot commit trailers from dep-diff-mcp's own PRs.
 const single = [
@@ -86,5 +86,58 @@ describe("parseDependabotScopes", () => {
 
 	it("tolerates an empty list of commits", () => {
 		assert.deepEqual([...parseDependabotScopes([])], []);
+	});
+});
+
+// Renovate's prBodyColumns is user-configurable and merge-confidence badges
+// displace the Type column, so its position varies and it is often absent.
+// Header shapes below are real: MoJ #763, kit-data-manager #218, weblate #21437.
+describe("parseRenovateScopes", () => {
+	it("reads a Type column at index 1 (MoJ #763)", () => {
+		const body = [
+			"| Package | Type | Update | Change |",
+			"|---|---|---|---|",
+			"| [actions/setup-node](https://redirect.github.com/actions/setup-node) | action | major | `v6` \u2192 `v7` |",
+		].join("\n");
+		assert.deepEqual([...parseRenovateScopes(body)], [["actions/setup-node", "ci"]]);
+	});
+
+	it("reads a Type column at index 4 (kit-data-manager #218)", () => {
+		const body = [
+			"| Package | Change | [Age](https://x) | [Confidence](https://y) | Type | Update | Pending |",
+			"|---|---|---|---|---|---|---|",
+			"| [tsc-alias](https://x) ([source](https://y)) | [`1.9.2` \u2192 `1.9.3`](https://z) | ![age](https://a) | ![confidence](https://b) | devDependencies | patch |  |",
+		].join("\n");
+		assert.deepEqual([...parseRenovateScopes(body)], [["tsc-alias", "dev"]]);
+	});
+
+	it("returns nothing when there is no Type column (weblate #21437)", () => {
+		const body = [
+			"| Package | Change | [Age](https://x) | [Confidence](https://y) |",
+			"|---|---|---|---|",
+			"| [@sentry/browser](https://x) ([source](https://y)) | [`10.72.0` \u2192 `10.73.0`](https://z) | ![age](https://a) | ![confidence](https://b) |",
+		].join("\n");
+		assert.deepEqual([...parseRenovateScopes(body)], []);
+	});
+
+	it("maps every recognised manifest section", () => {
+		const body = [
+			"| Package | Type |",
+			"|---|---|",
+			"| a | dependencies |",
+			"| b | devDependencies |",
+			"| c | peerDependencies |",
+			"| d | optionalDependencies |",
+			"| e | action |",
+			"| f | somethingElse |",
+		].join("\n");
+		assert.deepEqual(
+			[...parseRenovateScopes(body)],
+			[["a", "runtime"], ["b", "dev"], ["c", "runtime"], ["d", "runtime"], ["e", "ci"]]
+		);
+	});
+
+	it("tolerates a missing body", () => {
+		assert.deepEqual([...parseRenovateScopes(undefined)], []);
 	});
 });
