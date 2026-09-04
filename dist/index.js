@@ -22658,12 +22658,12 @@ function endpointWithDefaults(defaults2, route, options) {
   return parse(merge(defaults2, route, options));
 }
 function withDefaults(oldDefaults, newDefaults) {
-  const DEFAULTS2 = merge(oldDefaults, newDefaults);
-  const endpoint2 = endpointWithDefaults.bind(null, DEFAULTS2);
+  const DEFAULTS22 = merge(oldDefaults, newDefaults);
+  const endpoint2 = endpointWithDefaults.bind(null, DEFAULTS22);
   return Object.assign(endpoint2, {
-    DEFAULTS: DEFAULTS2,
-    defaults: withDefaults.bind(null, DEFAULTS2),
-    merge: merge.bind(null, DEFAULTS2),
+    DEFAULTS: DEFAULTS22,
+    defaults: withDefaults.bind(null, DEFAULTS22),
+    merge: merge.bind(null, DEFAULTS22),
     parse
   });
 }
@@ -27662,9 +27662,13 @@ function urgency(severity) {
   return plain ? `${s}, ${plain}` : s;
 }
 
-// src/main.ts
+// src/action.ts
 var ORDER = ["security", "caution", "review", "likely-safe", "safe"];
 var CONCURRENCY = 8;
+var DEFAULTS2 = {
+  analyze: (ecosystem, name, from, to, token) => analyzePackageChange(ecosystem, name, from, to, token),
+  getOctokit: (token) => getOctokit(token)
+};
 async function mapLimit(items, limit, fn) {
   const out = new Array(items.length);
   let next = 0;
@@ -27677,7 +27681,8 @@ async function mapLimit(items, limit, fn) {
   await Promise.all(workers);
   return out;
 }
-async function run() {
+async function run(overrides = {}) {
+  const deps = { ...DEFAULTS2, ...overrides };
   const token = getInput("github-token", { required: true });
   const ecosystem = getInput("ecosystem") || "npm";
   const failOn = (getInput("fail-on") || "none").trim();
@@ -27710,10 +27715,11 @@ async function run() {
   info(
     `Analyzing ${changes.length} package change(s): ${changes.length - actionCount} in ${ecosystem}, ${actionCount} github-actions.`
   );
+  const octokit = deps.getOctokit(token);
   const [analyses, commitMessages] = await Promise.all([
     mapLimit(changes, CONCURRENCY, async (c) => {
       try {
-        return await analyzePackageChange(
+        return await deps.analyze(
           // A slashed, unscoped name is a repository coordinate, so the name
           // itself settles the ecosystem regardless of the configured default.
           c.ecosystem ?? ecosystem,
@@ -27732,7 +27738,7 @@ async function run() {
       }
     }),
     // Scope does not feed the analysis, so fetching it alongside costs nothing.
-    fetchCommitMessages(token, pr.number)
+    fetchCommitMessages(octokit, pr.number)
   ]);
   const scopes = parseDependabotScopes(commitMessages);
   for (const [name, scope] of parseRenovateScopes(body)) {
@@ -27763,10 +27769,10 @@ ${LOG_BANNER}
   startGroup("Risk report");
   info(report);
   endGroup();
-  if (shouldComment) await upsertComment(token, pr.number, capForComment(report));
+  if (shouldComment) await upsertComment(octokit, pr.number, capForComment(report));
   if (labelName) {
     const current = (pr.labels ?? []).map((l) => l.name);
-    await reconcileLabel(token, pr.number, labelName, safe, current.includes(labelName));
+    await reconcileLabel(octokit, pr.number, labelName, safe, current.includes(labelName));
   }
   if (failOn !== "none") {
     const threshold = ORDER.indexOf(failOn);
@@ -27777,8 +27783,7 @@ ${LOG_BANNER}
     }
   }
 }
-async function fetchCommitMessages(token, issueNumber) {
-  const octokit = getOctokit(token);
+async function fetchCommitMessages(octokit, issueNumber) {
   const { owner, repo } = context2.repo;
   try {
     const commits = await octokit.paginate(octokit.rest.pulls.listCommits, {
@@ -27793,9 +27798,8 @@ async function fetchCommitMessages(token, issueNumber) {
     return [];
   }
 }
-async function reconcileLabel(token, issueNumber, name, safe, present) {
+async function reconcileLabel(octokit, issueNumber, name, safe, present) {
   if (safe === present) return;
-  const octokit = getOctokit(token);
   const { owner, repo } = context2.repo;
   try {
     if (safe) {
@@ -27812,8 +27816,7 @@ async function reconcileLabel(token, issueNumber, name, safe, present) {
     );
   }
 }
-async function upsertComment(token, issueNumber, body) {
-  const octokit = getOctokit(token);
+async function upsertComment(octokit, issueNumber, body) {
   const { owner, repo } = context2.repo;
   try {
     const existing = await octokit.paginate(octokit.rest.issues.listComments, {
@@ -27836,10 +27839,9 @@ async function upsertComment(token, issueNumber, body) {
     );
   }
 }
+
+// src/main.ts
 run().catch((err) => setFailed(err.message));
-export {
-  run
-};
 /*! Bundled license information:
 
 undici/lib/web/fetch/body.js:
