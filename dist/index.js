@@ -1910,10 +1910,10 @@ var require_request = __commonJS({
       } else if (val === void 0) {
         return;
       }
-      let headerName = headerNameLowerCasedRecord[key];
-      if (headerName === void 0) {
-        headerName = key.toLowerCase();
-        if (headerNameLowerCasedRecord[headerName] === void 0 && !isValidHTTPToken(headerName)) {
+      let headerName2 = headerNameLowerCasedRecord[key];
+      if (headerName2 === void 0) {
+        headerName2 = key.toLowerCase();
+        if (headerNameLowerCasedRecord[headerName2] === void 0 && !isValidHTTPToken(headerName2)) {
           throw new InvalidArgumentError("invalid header key");
         }
       }
@@ -1950,7 +1950,7 @@ var require_request = __commonJS({
           throw new InvalidArgumentError(`invalid ${key} header`);
         }
       }
-      if (headerName === "host") {
+      if (headerName2 === "host") {
         if (request2.host !== null) {
           throw new InvalidArgumentError("duplicate host header");
         }
@@ -1958,7 +1958,7 @@ var require_request = __commonJS({
           throw new InvalidArgumentError("invalid host header");
         }
         request2.host = val;
-      } else if (headerName === "content-length") {
+      } else if (headerName2 === "content-length") {
         if (request2.contentLength !== null) {
           throw new InvalidArgumentError("duplicate content-length header");
         }
@@ -1966,12 +1966,12 @@ var require_request = __commonJS({
         if (!Number.isFinite(request2.contentLength)) {
           throw new InvalidArgumentError("invalid content-length header");
         }
-      } else if (request2.contentType === null && headerName === "content-type") {
+      } else if (request2.contentType === null && headerName2 === "content-type") {
         request2.contentType = val;
         request2.headers.push(key, val);
-      } else if (headerName === "transfer-encoding" || headerName === "keep-alive" || headerName === "upgrade") {
-        throw new InvalidArgumentError(`invalid ${headerName} header`);
-      } else if (headerName === "connection") {
+      } else if (headerName2 === "transfer-encoding" || headerName2 === "keep-alive" || headerName2 === "upgrade") {
+        throw new InvalidArgumentError(`invalid ${headerName2} header`);
+      } else if (headerName2 === "connection") {
         const value = typeof val === "string" ? val.toLowerCase() : null;
         if (value !== "close" && value !== "keep-alive") {
           throw new InvalidArgumentError("invalid connection header");
@@ -1979,7 +1979,7 @@ var require_request = __commonJS({
         if (value === "close") {
           request2.reset = true;
         }
-      } else if (headerName === "expect") {
+      } else if (headerName2 === "expect") {
         throw new NotSupportedError("expect header not supported");
       } else {
         request2.headers.push(key, val);
@@ -2679,12 +2679,12 @@ var require_constants2 = __commonJS({
       ERROR2[ERROR2["PAUSED_H2_UPGRADE"] = 23] = "PAUSED_H2_UPGRADE";
       ERROR2[ERROR2["USER"] = 24] = "USER";
     })(ERROR = exports.ERROR || (exports.ERROR = {}));
-    var TYPE;
-    (function(TYPE2) {
-      TYPE2[TYPE2["BOTH"] = 0] = "BOTH";
-      TYPE2[TYPE2["REQUEST"] = 1] = "REQUEST";
-      TYPE2[TYPE2["RESPONSE"] = 2] = "RESPONSE";
-    })(TYPE = exports.TYPE || (exports.TYPE = {}));
+    var TYPE2;
+    (function(TYPE3) {
+      TYPE3[TYPE3["BOTH"] = 0] = "BOTH";
+      TYPE3[TYPE3["REQUEST"] = 1] = "REQUEST";
+      TYPE3[TYPE3["RESPONSE"] = 2] = "RESPONSE";
+    })(TYPE2 = exports.TYPE || (exports.TYPE = {}));
     var FLAGS;
     (function(FLAGS2) {
       FLAGS2[FLAGS2["CONNECTION_KEEP_ALIVE"] = 1] = "CONNECTION_KEEP_ALIVE";
@@ -5221,13 +5221,13 @@ var require_formdata_parser = __commonJS({
           }
           return { name, filename, contentType, encoding };
         }
-        let headerName = collectASequenceOfBytes(
+        let headerName2 = collectASequenceOfBytes(
           (char) => char !== 10 && char !== 13 && char !== 58,
           input,
           position
         );
-        headerName = removeChars(headerName, true, true, (char) => char === 9 || char === 32);
-        if (!HTTP_TOKEN_CODEPOINTS.test(headerName.toString())) {
+        headerName2 = removeChars(headerName2, true, true, (char) => char === 9 || char === 32);
+        if (!HTTP_TOKEN_CODEPOINTS.test(headerName2.toString())) {
           return "failure";
         }
         if (input[position.position] !== 58) {
@@ -5239,7 +5239,7 @@ var require_formdata_parser = __commonJS({
           input,
           position
         );
-        switch (bufferToLowerCasedHeaderName(headerName)) {
+        switch (bufferToLowerCasedHeaderName(headerName2)) {
           case "content-disposition": {
             name = filename = null;
             if (!bufferStartsWith(input, formDataNameBuffer, position)) {
@@ -5988,10 +5988,10 @@ var require_client_h1 = __commonJS({
         }
         const key = this.headers[len - 2];
         if (key.length === 10) {
-          const headerName = util.bufferToLowerCasedHeaderName(key);
-          if (headerName === "keep-alive") {
+          const headerName2 = util.bufferToLowerCasedHeaderName(key);
+          if (headerName2 === "keep-alive") {
             this.keepAlive += buf.toString();
-          } else if (headerName === "connection") {
+          } else if (headerName2 === "connection") {
             this.connection += buf.toString();
           }
         } else if (key.length === 14 && util.bufferToLowerCasedHeaderName(key) === "content-length") {
@@ -10555,8 +10555,8 @@ var require_mock_utils = __commonJS({
     }
     function lowerCaseEntries(headers) {
       return Object.fromEntries(
-        Object.entries(headers).map(([headerName, headerValue]) => {
-          return [headerName.toLocaleLowerCase(), headerValue];
+        Object.entries(headers).map(([headerName2, headerValue]) => {
+          return [headerName2.toLocaleLowerCase(), headerValue];
         })
       );
     }
@@ -13989,8 +13989,8 @@ var require_fetch = __commonJS({
       if ([301, 302].includes(actualResponse.status) && request2.method === "POST" || actualResponse.status === 303 && !GET_OR_HEAD.includes(request2.method)) {
         request2.method = "GET";
         request2.body = null;
-        for (const headerName of requestBodyHeader) {
-          request2.headersList.delete(headerName);
+        for (const headerName2 of requestBodyHeader) {
+          request2.headersList.delete(headerName2);
         }
       }
       if (!sameOrigin(requestCurrentURL(request2), locationURL)) {
@@ -21942,7 +21942,7 @@ var Summary = class {
    */
   addTable(rows) {
     const tableBody = rows.map((row) => {
-      const cells = row.map((cell2) => {
+      const cells2 = row.map((cell2) => {
         if (typeof cell2 === "string") {
           return this.wrap("td", cell2);
         }
@@ -21951,7 +21951,7 @@ var Summary = class {
         const attrs = Object.assign(Object.assign({}, colspan && { colspan }), rowspan && { rowspan });
         return this.wrap(tag, data, attrs);
       }).join("");
-      return this.wrap("tr", cells);
+      return this.wrap("tr", cells2);
     }).join("");
     const element = this.wrap("table", tableBody);
     return this.addRaw(element).addEOL();
@@ -22098,6 +22098,9 @@ function setOutput(name, value) {
 function setFailed(message) {
   process.exitCode = ExitCode.Failure;
   error(message);
+}
+function debug(message) {
+  issueCommand("debug", {}, message);
 }
 function error(message, properties = {}) {
   issueCommand("error", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
@@ -27357,6 +27360,90 @@ function detectEcosystem(name, line) {
   return badge?.[1] ? BADGE_MAP[badge[1].toLowerCase()] : void 0;
 }
 
+// src/scope.ts
+var DEPENDABOT_TYPE = {
+  "direct:production": "runtime",
+  "direct:development": "dev",
+  indirect: "indirect"
+};
+var NAME = /^-\s+dependency-name:\s*(.+?)\s*$/;
+var TYPE = /^\s+dependency-type:\s*(\S+)\s*$/;
+var unquote = (v) => v.replace(/^["']|["']$/g, "");
+function parseDependabotScopes(commitMessages) {
+  const out = /* @__PURE__ */ new Map();
+  for (const message of commitMessages) {
+    let inBlock = false;
+    let name;
+    for (const raw of message.split("\n")) {
+      const line = raw.trimEnd();
+      if (/^updated-dependencies:\s*$/.test(line)) {
+        inBlock = true;
+        continue;
+      }
+      if (!inBlock) continue;
+      if (line === "..." || line === "---") {
+        inBlock = false;
+        name = void 0;
+        continue;
+      }
+      const n = line.match(NAME);
+      if (n) {
+        name = unquote(n[1]);
+        continue;
+      }
+      const t = line.match(TYPE);
+      if (!t || !name) continue;
+      const scope = DEPENDABOT_TYPE[t[1]];
+      if (scope) out.set(name, scope);
+    }
+  }
+  return out;
+}
+var RENOVATE_TYPE = {
+  dependencies: "runtime",
+  devdependencies: "dev",
+  // Peer and optional dependencies still ship to whoever installs the package.
+  peerdependencies: "runtime",
+  optionaldependencies: "runtime",
+  action: "ci"
+};
+function cells(line) {
+  const t = line.trim();
+  if (!t.startsWith("|")) return [];
+  return t.replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+}
+function nameFrom(cell2) {
+  const link = cell2.match(/^\[([^\]]+)\]\([^)]*\)/);
+  return (link ? link[1] : cell2.replace(/\s*\(.*$/, "")).trim();
+}
+var HEADER_CELL = /^\[?([A-Za-z ]+)\]?/;
+var headerName = (cell2) => (cell2.match(HEADER_CELL)?.[1] ?? "").trim().toLowerCase();
+function parseRenovateScopes(body) {
+  const out = /* @__PURE__ */ new Map();
+  if (!body) return out;
+  let packageIdx = -1;
+  let typeIdx = -1;
+  for (const line of body.split("\n")) {
+    const row = cells(line);
+    if (row.length === 0) continue;
+    if (typeIdx === -1) {
+      const names = row.map(headerName);
+      const p = names.indexOf("package");
+      const t = names.indexOf("type");
+      if (p !== -1 && t !== -1) {
+        packageIdx = p;
+        typeIdx = t;
+      }
+      continue;
+    }
+    if (row.every((c) => /^:?-+:?$/.test(c))) continue;
+    const name = nameFrom(row[packageIdx] ?? "");
+    const scope = RENOVATE_TYPE[(row[typeIdx] ?? "").toLowerCase()];
+    if (name && scope) out.set(name, scope);
+  }
+  return out;
+}
+
 // src/render.ts
 var COMMENT_MARKER = "<!-- dependabot-risk -->";
 var RANK = {
@@ -27374,6 +27461,19 @@ var URGENCY = {
   MODERATE: "worth fixing",
   MEDIUM: "worth fixing",
   LOW: "minor"
+};
+var SCOPE_TAG = {
+  dev: "\u{1F527}dev",
+  ci: "\u2699\uFE0Fci",
+  indirect: "\u{1F4E6}indirect"
+};
+var tagSuffix = (a) => {
+  const tag = a.scope ? SCOPE_TAG[a.scope] : void 0;
+  return tag ? ` ${tag}` : "";
+};
+var SCOPE_NOTE = {
+  dev: "This is build tooling \u2014 it does not ship to production, but it does run in CI with access to your tokens.",
+  ci: "This runs in CI with access to your tokens."
 };
 var FOOTER = "<sub>[Dependabot Risk Report](https://github.com/marketplace/actions/dependabot-risk-report) by DigiCatalyst Systems \xB7 ranked by what the release notes and advisories actually say, not by semver \xB7 powered by [dep-diff-mcp](https://github.com/DigiCatalyst-Systems/dep-diff-mcp).</sub>";
 var SUMMARY_HEADING = "## \u{1F6E1}\uFE0F Dependabot Risk Report\n\n<sub>by DigiCatalyst Systems \xB7 [install it](https://github.com/marketplace/actions/dependabot-risk-report)</sub>";
@@ -27432,6 +27532,8 @@ function single(a) {
       "",
       ...fixes.map((f) => `- **${cleanSummary(f, a.package)}** \u2014 ${urgency(f.severity)}`)
     );
+    const note = a.scope ? SCOPE_NOTE[a.scope] : void 0;
+    if (note) out.push("", note);
     if (breaks.length === 0) out.push("", "Nothing else changes. Safe to merge as is.");
   }
   if (breaks.length > 0) {
@@ -27489,7 +27591,7 @@ function grouped(attention, routine, total) {
   const all = [...attention, ...routine];
   for (const a of all) {
     const change = a.error ? "\u2014" : `${a.fromVersion} \u2192 ${a.toVersion}`;
-    out.push(`| ${packageMarker(a)} | \`${a.package}\` | ${change} | ${cell(whatToKnow(a))} |`);
+    out.push(`| ${packageMarker(a)} | \`${a.package}\`${tagSuffix(a)} | ${change} | ${cell(whatToKnow(a))} |`);
   }
   for (const a of all) {
     const breaks = a.breakingChanges ?? [];
@@ -27601,26 +27703,42 @@ async function run() {
   info(
     `Analyzing ${changes.length} package change(s): ${changes.length - actionCount} in ${ecosystem}, ${actionCount} github-actions.`
   );
-  const analyses = await mapLimit(changes, CONCURRENCY, async (c) => {
-    try {
-      return await analyzePackageChange(
-        // A slashed, unscoped name is a repository coordinate, so the name
-        // itself settles the ecosystem regardless of the configured default.
-        c.ecosystem ?? ecosystem,
-        c.name,
-        c.fromVersion,
-        c.toVersion,
-        token
-      );
-    } catch (err) {
-      warning(`Could not analyze ${c.name}: ${err.message}`);
-      return {
-        package: c.name,
-        error: err.message,
-        recommendationLevel: "review"
-      };
-    }
-  });
+  const [analyses, commitMessages] = await Promise.all([
+    mapLimit(changes, CONCURRENCY, async (c) => {
+      try {
+        return await analyzePackageChange(
+          // A slashed, unscoped name is a repository coordinate, so the name
+          // itself settles the ecosystem regardless of the configured default.
+          c.ecosystem ?? ecosystem,
+          c.name,
+          c.fromVersion,
+          c.toVersion,
+          token
+        );
+      } catch (err) {
+        warning(`Could not analyze ${c.name}: ${err.message}`);
+        return {
+          package: c.name,
+          error: err.message,
+          recommendationLevel: "review"
+        };
+      }
+    }),
+    // Scope does not feed the analysis, so fetching it alongside costs nothing.
+    fetchCommitMessages(token, pr.number)
+  ]);
+  const scopes = parseDependabotScopes(commitMessages);
+  for (const [name, scope] of parseRenovateScopes(body)) {
+    if (!scopes.has(name)) scopes.set(name, scope);
+  }
+  for (const [i, a] of analyses.entries()) {
+    const scope = changes[i].ecosystem === "github-actions" ? "ci" : scopes.get(changes[i].name);
+    if (scope) a.scope = scope;
+  }
+  const unscoped = analyses.filter((a) => !a.scope).length;
+  if (unscoped > 0) {
+    debug(`No dependency scope found for ${unscoped} of ${analyses.length} package(s).`);
+  }
   const report = renderComment(analyses);
   const level = highestLevel(analyses);
   const securityCount = analyses.reduce((n, a) => n + (a.securityFixes?.length ?? 0), 0);
@@ -27644,6 +27762,22 @@ ${LOG_BANNER}
     } else if (ORDER.indexOf(level) <= threshold) {
       setFailed(`Highest risk level is "${level}", at or above the fail-on threshold "${failOn}".`);
     }
+  }
+}
+async function fetchCommitMessages(token, issueNumber) {
+  const octokit = getOctokit(token);
+  const { owner, repo } = context2.repo;
+  try {
+    const commits = await octokit.paginate(octokit.rest.pulls.listCommits, {
+      owner,
+      repo,
+      pull_number: issueNumber,
+      per_page: 100
+    });
+    return commits.map((c) => c.commit.message);
+  } catch (err) {
+    debug(`Could not read pull request commits for dependency scope: ${err.message}`);
+    return [];
   }
 }
 async function upsertComment(token, issueNumber, body) {

@@ -45,18 +45,44 @@ When something will actually break:
 >
 > [Migration guide →](https://expressjs.com/en/guide/migrating-5.html)
 
-And for a grouped PR, which is where triage actually costs you time:
+And for a grouped PR, which is where triage actually costs you time — one row
+per package, routine ones included, so a quiet row reads as "I checked this"
+rather than "I skipped this":
 
-> ### 2 of 5 updates need a look
->
-> **🔴 Merge first**
-> - `lodash` 4.17.20 → 4.17.21 — closes **Command Injection** (HIGH, fix soon) and 1 more
->
-> **⚠️ Read first**
-> - `express` 4.18.2 → 5.0.0 — 2 breaking changes · [migration guide]
->
-> **✅ Routine** — no advisories, no breaking changes
-> `esbuild`, `tsx`, `zod`
+### 2 of 5 updates need a look
+
+|  | Package | Change | What to know |
+|---|---|---|---|
+| 🚨 | `lodash` | 4.17.20 → 4.17.21 | closes Command Injection (HIGH, fix soon) · 1 more |
+| 🚫 | `actions/checkout` ⚙️ci | 4 → 7 | 3 breaking changes · now requires runner v2.327.1 |
+| ✅ | `esbuild` 🔧dev | 0.28.1 → 0.28.2 | nothing found |
+| ✅ | `tsx` 🔧dev | 4.21.0 → 4.23.13 | nothing found |
+| ✅ | `zod` | 4.3.6 → 4.5.2 | nothing found |
+
+The full list of what breaks sits in a `<details>` block under the table, so
+nothing is truncated anywhere.
+
+### Dependency scope
+
+Packages that do not ship to production are tagged:
+
+| tag | meaning |
+|---|---|
+| `🔧dev` | a development dependency — build tooling, tests, types |
+| `⚙️ci` | a GitHub Actions workflow step |
+| `📦indirect` | a transitive dependency, pulled in by something else |
+
+Runtime dependencies are unmarked, because that is the default case.
+
+**Scope never changes a package's risk level.** A build tool runs in CI holding
+your repository token — that is exactly how the `tj-actions/changed-files`
+attack worked — so a security advisory in one is still reported as a security
+advisory. The tag tells you where the code runs; it does not tell you to worry
+less.
+
+The scope is read from Dependabot's commit trailer, or from Renovate's `Type`
+column where the repository is configured to include one. Where neither is
+available the package is simply left untagged.
 
 ## Usage
 
