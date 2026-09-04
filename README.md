@@ -113,6 +113,23 @@ pull request itself and uses the job's own `GITHUB_TOKEN`.
 The `if:` is optional — without it the action runs on every pull request and simply
 reports that it found no dependency bumps. It is there to save a runner minute.
 
+### Versions and pinning
+
+`@v1` tracks the newest `v1.x` release, so fixes and new features arrive without
+a change on your side. Every version is listed in [CHANGELOG.md](CHANGELOG.md),
+mirrored from
+[Releases](https://github.com/DigiCatalyst-Systems/dependabot-risk/releases).
+
+To decide for yourself when the action changes, pin the commit SHA instead —
+which is what we would suggest if you already pin your other actions that way:
+
+```yaml
+      - uses: DigiCatalyst-Systems/dependabot-risk@e7ac917d4c5e220188941418db2c7dc8d76f8f73 # v1.1.0
+```
+
+Released versions are immutable: a `vX.Y.Z` tag in this repository cannot be
+moved or deleted once pushed, by anyone, including us. Only `v1` moves.
+
 ### Fail the check on risky upgrades
 
 ```yaml
