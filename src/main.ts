@@ -3,6 +3,7 @@ import * as github from "@actions/github";
 import { analyzePackageChange } from "@digicatalyst/dep-diff-mcp/dist/analyzer.js";
 import { isDependencyBot, parseDependabotPr, type Ecosystem } from "./dependabot.ts";
 import { parseRenovatePr } from "./renovate.ts";
+import { parseDependabotScopes, parseRenovateScopes, type Scope } from "./scope.ts";
 import {
 	COMMENT_MARKER,
 	capForComment,
@@ -73,27 +74,48 @@ export async function run(): Promise<void> {
 			`${changes.length - actionCount} in ${ecosystem}, ${actionCount} github-actions.`
 	);
 
-	const analyses: Analyzed[] = await mapLimit(changes, CONCURRENCY, async (c) => {
-		try {
-			return (await analyzePackageChange(
-				// A slashed, unscoped name is a repository coordinate, so the name
-				// itself settles the ecosystem regardless of the configured default.
-				c.ecosystem ?? ecosystem,
-				c.name,
-				c.fromVersion,
-				c.toVersion,
-				token
-			)) as Analyzed;
-		} catch (err) {
-			// Report the failure in place. Dropping it would silently understate risk.
-			core.warning(`Could not analyze ${c.name}: ${(err as Error).message}`);
-			return {
-				package: c.name,
-				error: (err as Error).message,
-				recommendationLevel: "review",
-			};
-		}
-	});
+	const [analyses, commitMessages] = await Promise.all([
+		mapLimit(changes, CONCURRENCY, async (c): Promise<Analyzed> => {
+			try {
+				return (await analyzePackageChange(
+					// A slashed, unscoped name is a repository coordinate, so the name
+					// itself settles the ecosystem regardless of the configured default.
+					c.ecosystem ?? ecosystem,
+					c.name,
+					c.fromVersion,
+					c.toVersion,
+					token
+				)) as Analyzed;
+			} catch (err) {
+				// Report the failure in place. Dropping it would silently understate risk.
+				core.warning(`Could not analyze ${c.name}: ${(err as Error).message}`);
+				return {
+					package: c.name,
+					error: (err as Error).message,
+					recommendationLevel: "review",
+				};
+			}
+		}),
+		// Scope does not feed the analysis, so fetching it alongside costs nothing.
+		fetchCommitMessages(token, pr.number),
+	]);
+
+	// mapLimit preserves order, so analyses and changes stay index-aligned.
+	const scopes = parseDependabotScopes(commitMessages);
+	for (const [name, scope] of parseRenovateScopes(body)) {
+		if (!scopes.has(name)) scopes.set(name, scope);
+	}
+	for (const [i, a] of analyses.entries()) {
+		// Dependabot calls actions/checkout `direct:production`, which is true but
+		// useless -- the reader needs "this runs in CI", not "this is production".
+		const scope: Scope | undefined =
+			changes[i]!.ecosystem === "github-actions" ? "ci" : scopes.get(changes[i]!.name);
+		if (scope) a.scope = scope;
+	}
+	const unscoped = analyses.filter((a) => !a.scope).length;
+	if (unscoped > 0) {
+		core.debug(`No dependency scope found for ${unscoped} of ${analyses.length} package(s).`);
+	}
 
 	const report = renderComment(analyses);
 	const level = highestLevel(analyses);
@@ -123,6 +145,31 @@ export async function run(): Promise<void> {
 		} else if (ORDER.indexOf(level) <= threshold) {
 			core.setFailed(`Highest risk level is "${level}", at or above the fail-on threshold "${failOn}".`);
 		}
+	}
+}
+
+/**
+ * Dependabot publishes the dependency scope in its commit trailer. Reading it
+ * needs only `pull-requests: read`, which the documented workflow already
+ * grants -- no manifest parsing and no `contents:` permission.
+ *
+ * Failure is debug, not warning: an absent annotation understates nothing, and
+ * a routine warning here would corrode the green all-clear.
+ */
+async function fetchCommitMessages(token: string, issueNumber: number): Promise<string[]> {
+	const octokit = github.getOctokit(token);
+	const { owner, repo } = github.context.repo;
+	try {
+		const commits = await octokit.paginate(octokit.rest.pulls.listCommits, {
+			owner,
+			repo,
+			pull_number: issueNumber,
+			per_page: 100,
+		});
+		return commits.map((c) => c.commit.message);
+	} catch (err) {
+		core.debug(`Could not read pull request commits for dependency scope: ${(err as Error).message}`);
+		return [];
 	}
 }
 
