@@ -23,6 +23,10 @@ inputs:
     description: "Fail the check when risk reaches this level: security, caution, review, likely-safe, safe, or none."
     required: false
     default: "none"
+  label:
+    description: "Label to apply when the pull request is safe to automerge, and to remove when it stops being. Empty disables labelling. Needs pull-requests: write."
+    required: false
+    default: ""
 
 outputs:
   highest-level:
@@ -31,6 +35,8 @@ outputs:
     description: "Total number of security advisories resolved across the pull request."
   summary:
     description: "The rendered Markdown report."
+  safe-to-automerge:
+    description: "\"true\" when every package resolved no advisories, had no breaking changes, and was a patch or minor bump. \"false\" when nothing could be analyzed."
 
 runs:
   using: "node24"

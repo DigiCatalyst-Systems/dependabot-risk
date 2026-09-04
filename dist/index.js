@@ -27493,6 +27493,11 @@ function highestLevel(analyses) {
   if (analyses.length === 0) return "safe";
   return analyses.reduce((worst, a) => rank(a) < rank(worst) ? a : worst).recommendationLevel;
 }
+var AUTOMERGE_SAFE = /* @__PURE__ */ new Set(["safe", "likely-safe"]);
+function isSafeToAutomerge(analyses) {
+  if (analyses.length === 0) return false;
+  return AUTOMERGE_SAFE.has(highestLevel(analyses));
+}
 function renderComment(analyses) {
   const sorted = [...analyses].sort((a, b) => rank(a) - rank(b));
   const attention = sorted.filter(needsAttention);
@@ -27677,6 +27682,7 @@ async function run() {
   const ecosystem = getInput("ecosystem") || "npm";
   const failOn = (getInput("fail-on") || "none").trim();
   const shouldComment = getBooleanInput("comment");
+  const labelName = getInput("label").trim();
   const pr = context2.payload.pull_request;
   if (!pr) {
     info("Not a pull_request event \u2014 nothing to analyze.");
@@ -27697,6 +27703,7 @@ async function run() {
     }
     setOutput("highest-level", "safe");
     setOutput("security-count", "0");
+    setOutput("safe-to-automerge", "false");
     return;
   }
   const actionCount = changes.filter((c) => c.ecosystem === "github-actions").length;
@@ -27742,9 +27749,11 @@ async function run() {
   const report = renderComment(analyses);
   const level = highestLevel(analyses);
   const securityCount = analyses.reduce((n, a) => n + (a.securityFixes?.length ?? 0), 0);
+  const safe = isSafeToAutomerge(analyses);
   setOutput("highest-level", level);
   setOutput("security-count", String(securityCount));
   setOutput("summary", report);
+  setOutput("safe-to-automerge", String(safe));
   await summary.addRaw(`${SUMMARY_HEADING}
 
 ${report}`).write();
@@ -27755,6 +27764,10 @@ ${LOG_BANNER}
   info(report);
   endGroup();
   if (shouldComment) await upsertComment(token, pr.number, capForComment(report));
+  if (labelName) {
+    const current = (pr.labels ?? []).map((l) => l.name);
+    await reconcileLabel(token, pr.number, labelName, safe, current.includes(labelName));
+  }
   if (failOn !== "none") {
     const threshold = ORDER.indexOf(failOn);
     if (threshold === -1) {
@@ -27778,6 +27791,25 @@ async function fetchCommitMessages(token, issueNumber) {
   } catch (err) {
     debug(`Could not read pull request commits for dependency scope: ${err.message}`);
     return [];
+  }
+}
+async function reconcileLabel(token, issueNumber, name, safe, present) {
+  if (safe === present) return;
+  const octokit = getOctokit(token);
+  const { owner, repo } = context2.repo;
+  try {
+    if (safe) {
+      await octokit.rest.issues.addLabels({ owner, repo, issue_number: issueNumber, labels: [name] });
+      info(`Labelled "${name}" \u2014 no advisories, no breaking changes, patch or minor only.`);
+      return;
+    }
+    await octokit.rest.issues.removeLabel({ owner, repo, issue_number: issueNumber, name });
+    info(`Removed "${name}" \u2014 this pull request no longer meets the bar.`);
+  } catch (err) {
+    if (!safe && err.status === 404) return;
+    warning(
+      `Could not ${safe ? "add" : "remove"} the "${name}" label (${err.message}). Grant pull-requests: write, or clear the \`label\` input to disable labelling.`
+    );
   }
 }
 async function upsertComment(token, issueNumber, body) {

@@ -145,6 +145,7 @@ No configuration needed — they are detected from the name:
 | `ecosystem` | `npm` | Default for names that do not settle it themselves: `npm` or `pypi`. GitHub Actions bumps are detected from the name. |
 | `comment` | `true` | Post and update a comment on the PR. |
 | `fail-on` | `none` | Fail at this level or worse: `security`, `caution`, `review`, `likely-safe`, `safe`, `none`. |
+| `label` | *(none)* | Label to apply when the PR is safe to automerge, and remove when it stops being. Empty disables labelling. |
 
 ## Outputs
 
@@ -153,6 +154,46 @@ No configuration needed — they are detected from the name:
 | `highest-level` | Riskiest level found across the PR. |
 | `security-count` | Total advisories resolved by the PR. |
 | `summary` | The rendered Markdown report. |
+| `safe-to-automerge` | `true` when no advisories, no breaking changes, and patch/minor only. `false` when nothing could be analyzed. |
+
+### Automerging the boring ones
+
+Most dependency PRs are a patch bump with nothing in the release notes. This
+action can say so in a form your own workflow can act on:
+
+```yaml
+      - uses: DigiCatalyst-Systems/dependabot-risk@v1
+        id: risk
+        with:
+          label: safe-to-automerge
+
+      - if: steps.risk.outputs.safe-to-automerge == 'true'
+        run: gh pr merge --auto --squash "${{ github.event.pull_request.html_url }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+```
+
+`safe-to-automerge` is `true` only when every package in the PR resolved no
+advisories, had no breaking changes in its release notes, and was a patch or
+minor bump. A package the action could not check is never safe, and neither is
+a PR it could not read at all.
+
+The output works on its own — you do not need the label, and reading it needs no
+write permission. Set `label` as well if you want the state visible in the PR
+list, or if you drive automerge from a label rule.
+
+**The label is reconciled on every run.** It is added when the PR qualifies and
+**removed when it stops qualifying** — so if a force-push adds a major bump, the
+label comes off before anything merges it. That also means a hand-applied label
+is stripped on the next unsafe run: a stale "safe to merge" is worse than an
+overridden human, because a bot acts on it without reading. To force a merge,
+merge it directly.
+
+**This action never merges anything itself.** Merging would need
+`contents: write` — write access to your source, from a tool whose whole pitch
+is supply-chain safety. `gh pr merge --auto` above is GitHub's own automerge,
+and it respects your branch protection, required checks and merge queue. The
+action's job is the verdict; the merge stays yours.
 
 ## What it reads
 

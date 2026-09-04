@@ -8,6 +8,7 @@ import {
 	COMMENT_MARKER,
 	capForComment,
 	highestLevel,
+	isSafeToAutomerge,
 	renderComment,
 	LOG_BANNER,
 	SUMMARY_HEADING,
@@ -36,6 +37,9 @@ export async function run(): Promise<void> {
 	const ecosystem = (core.getInput("ecosystem") || "npm") as Ecosystem;
 	const failOn = (core.getInput("fail-on") || "none").trim();
 	const shouldComment = core.getBooleanInput("comment");
+	// Empty disables labelling. Opt-in, because a label that appears unasked may
+	// trigger an automerge workflow the repository already has.
+	const labelName = core.getInput("label").trim();
 
 	const pr = github.context.payload.pull_request;
 	if (!pr) {
@@ -65,6 +69,10 @@ export async function run(): Promise<void> {
 		}
 		core.setOutput("highest-level", "safe");
 		core.setOutput("security-count", "0");
+		// Nothing was analyzed, so nothing is safe to merge unread. "highest-level"
+		// says "safe" here only because there is no risk on record -- which is not
+		// the same claim.
+		core.setOutput("safe-to-automerge", "false");
 		return;
 	}
 
@@ -121,9 +129,12 @@ export async function run(): Promise<void> {
 	const level = highestLevel(analyses);
 	const securityCount = analyses.reduce((n, a) => n + (a.securityFixes?.length ?? 0), 0);
 
+	const safe = isSafeToAutomerge(analyses);
+
 	core.setOutput("highest-level", level);
 	core.setOutput("security-count", String(securityCount));
 	core.setOutput("summary", report);
+	core.setOutput("safe-to-automerge", String(safe));
 	await core.summary.addRaw(`${SUMMARY_HEADING}\n\n${report}`).write();
 
 	// The log is the one surface that cannot be blocked by a fork's read-only
@@ -137,6 +148,11 @@ export async function run(): Promise<void> {
 	core.endGroup();
 
 	if (shouldComment) await upsertComment(token, pr.number, capForComment(report));
+
+	if (labelName) {
+		const current = ((pr.labels ?? []) as { name?: string }[]).map((l) => l.name);
+		await reconcileLabel(token, pr.number, labelName, safe, current.includes(labelName));
+	}
 
 	if (failOn !== "none") {
 		const threshold = ORDER.indexOf(failOn);
@@ -170,6 +186,47 @@ async function fetchCommitMessages(token: string, issueNumber: number): Promise<
 	} catch (err) {
 		core.debug(`Could not read pull request commits for dependency scope: ${(err as Error).message}`);
 		return [];
+	}
+}
+
+/**
+ * Keep the label in step with the current analysis, so it holds one invariant:
+ * present if and only if the latest run said safe.
+ *
+ * A stale "safe to merge" label is worse than a stale report, because an
+ * automerge workflow acts on it without reading it -- so a hand-applied label
+ * is stripped too. Anyone wanting to force a merge can merge directly.
+ *
+ * `pull-requests: write` grants both calls; no extra permission is needed.
+ */
+async function reconcileLabel(
+	token: string,
+	issueNumber: number,
+	name: string,
+	safe: boolean,
+	present: boolean
+): Promise<void> {
+	if (safe === present) return;
+	const octokit = github.getOctokit(token);
+	const { owner, repo } = github.context.repo;
+	try {
+		if (safe) {
+			await octokit.rest.issues.addLabels({ owner, repo, issue_number: issueNumber, labels: [name] });
+			core.info(`Labelled "${name}" — no advisories, no breaking changes, patch or minor only.`);
+			return;
+		}
+		await octokit.rest.issues.removeLabel({ owner, repo, issue_number: issueNumber, name });
+		core.info(`Removed "${name}" — this pull request no longer meets the bar.`);
+	} catch (err) {
+		// 404 on removal means the label is already gone, which is the end state
+		// we wanted; anything else the user asked for and did not get.
+		if (!safe && (err as { status?: number }).status === 404) return;
+		// The user opted in by naming a label, so a silent no-op here is a broken
+		// feature rather than a missing annotation.
+		core.warning(
+			`Could not ${safe ? "add" : "remove"} the "${name}" label (${(err as Error).message}). ` +
+				"Grant pull-requests: write, or clear the `label` input to disable labelling."
+		);
 	}
 }
 
