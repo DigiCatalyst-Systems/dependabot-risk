@@ -51,28 +51,28 @@ rather than "I skipped this":
 
 ### 2 of 5 updates need a look
 
-|  | Package | Change | What to know |
-|---|---|---|---|
-| 🚨 | `lodash` | 4.17.20 → 4.17.21 | closes Command Injection (HIGH, fix soon) · 1 more |
-| 🚫 | `actions/checkout` ⚙️ci | 4 → 7 | 3 breaking changes · now requires runner v2.327.1 |
-| ✅ | `esbuild` 🔧dev | 0.28.1 → 0.28.2 | nothing found |
-| ✅ | `tsx` 🔧dev | 4.21.0 → 4.23.13 | nothing found |
-| ✅ | `zod` | 4.3.6 → 4.5.2 | nothing found |
+|  | Package | Scope | Change | What to know |
+|---|---|---|---|---|
+| 🚨 | `lodash` | runtime | 4.17.20 → 4.17.21 | closes Command Injection (HIGH, fix soon) · 1 more |
+| 🚫 | `actions/checkout` | CI | 4 → 7 | 3 breaking changes · now requires runner v2.327.1 |
+| ✅ | `esbuild` | dev | 0.28.1 → 0.28.2 | nothing found |
+| ✅ | `tsx` | dev | 4.21.0 → 4.23.13 | nothing found |
+| ✅ | `zod` | runtime | 4.3.6 → 4.5.2 | nothing found |
 
 The full list of what breaks sits in a `<details>` block under the table, so
 nothing is truncated anywhere.
 
 ### Dependency scope
 
-Packages that do not ship to production are tagged:
+The **Scope** column says where each package actually runs:
 
-| tag | meaning |
+| scope | meaning |
 |---|---|
-| `🔧dev` | a development dependency — build tooling, tests, types |
-| `⚙️ci` | a GitHub Actions workflow step |
-| `📦indirect` | a transitive dependency, pulled in by something else |
-
-Runtime dependencies are unmarked, because that is the default case.
+| `runtime` | ships to production |
+| `dev` | a development dependency — build tooling, tests, types |
+| `CI` | a GitHub Actions workflow step |
+| `indirect` | a transitive dependency, pulled in by something else |
+| `—` | could not be determined |
 
 **Scope never changes a package's risk level.** A build tool runs in CI holding
 your repository token — that is exactly how the `tj-actions/changed-files`

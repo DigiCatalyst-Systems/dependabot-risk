@@ -27462,15 +27462,13 @@ var URGENCY = {
   MEDIUM: "worth fixing",
   LOW: "minor"
 };
-var SCOPE_TAG = {
-  dev: "\u{1F527}dev",
-  ci: "\u2699\uFE0Fci",
-  indirect: "\u{1F4E6}indirect"
+var SCOPE_LABEL = {
+  runtime: "runtime",
+  dev: "dev",
+  ci: "CI",
+  indirect: "indirect"
 };
-var tagSuffix = (a) => {
-  const tag = a.scope ? SCOPE_TAG[a.scope] : void 0;
-  return tag ? ` ${tag}` : "";
-};
+var scopeCell = (a) => a.scope ? SCOPE_LABEL[a.scope] : "\u2014";
 var SCOPE_NOTE = {
   dev: "This is build tooling \u2014 it does not ship to production, but it does run in CI with access to your tokens.",
   ci: "This runs in CI with access to your tokens."
@@ -27590,13 +27588,15 @@ function grouped(attention, routine, total) {
   const out = [
     `### ${attention.length} of ${total} update${total === 1 ? "" : "s"} need${attention.length === 1 ? "s" : ""} a look`,
     "",
-    "|  | Package | Change | What to know |",
-    "|---|---|---|---|"
+    "|  | Package | Scope | Change | What to know |",
+    "|---|---|---|---|---|"
   ];
   const all = [...attention, ...routine];
   for (const a of all) {
     const change = a.error ? "\u2014" : `${a.fromVersion} \u2192 ${a.toVersion}`;
-    out.push(`| ${packageMarker(a)} | \`${a.package}\`${tagSuffix(a)} | ${change} | ${cell(whatToKnow(a))} |`);
+    out.push(
+      `| ${packageMarker(a)} | \`${a.package}\` | ${scopeCell(a)} | ${change} | ${cell(whatToKnow(a))} |`
+    );
   }
   for (const a of all) {
     const breaks = a.breakingChanges ?? [];
