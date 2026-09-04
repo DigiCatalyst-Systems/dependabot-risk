@@ -70,14 +70,22 @@ permissions:
 
 jobs:
   risk:
-    if: github.actor == 'dependabot[bot]'
+    # Gate on the pull request's author, not `github.actor`. The actor is whoever
+    # triggered the run, so anyone reopening or pushing to a bot's branch would
+    # skip the check.
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]' ||
+      github.event.pull_request.user.login == 'renovate[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: DigiCatalyst-Systems/dependabot-risk@v1
 ```
 
 No configuration and no token setup: the action reads the version bumps out of the
-Dependabot PR itself and uses the job's own `GITHUB_TOKEN`.
+pull request itself and uses the job's own `GITHUB_TOKEN`.
+
+The `if:` is optional — without it the action runs on every pull request and simply
+reports that it found no dependency bumps. It is there to save a runner minute.
 
 ### Fail the check on risky upgrades
 
