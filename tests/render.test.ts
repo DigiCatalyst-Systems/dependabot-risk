@@ -4,6 +4,7 @@ import {
 	COMMENT_MARKER,
 	renderComment,
 	highestLevel,
+	isSafeToAutomerge,
 	capForComment,
 	MAX_COMMENT_CHARS,
 	SUMMARY_HEADING,
@@ -378,5 +379,91 @@ describe("per-package details block", () => {
 	it("adds no block for a package with nothing to expand", () => {
 		const out = renderComment(withChanges(4));
 		assert.ok(!/<b>esbuild<\/b>/.test(out), out);
+	});
+});
+
+describe("dependency scope", () => {
+	it("tags a dev dependency after its name in the grouped table", () => {
+		const devEsbuild: Analyzed = { ...esbuild, scope: "dev" };
+		const out = renderComment([lodash, devEsbuild, tsx]);
+		assert.match(out, /`esbuild` 🔧dev/);
+	});
+
+	it("leaves a runtime dependency unmarked, because runtime is the default", () => {
+		const out = renderComment([lodash, { ...esbuild, scope: "runtime" }, tsx]);
+		assert.match(out, /`esbuild` \|/);
+		assert.doesNotMatch(out, /🔧|⚙️|📦/);
+	});
+
+	it("tags a github-actions bump as ci", () => {
+		const checkout: Analyzed = {
+			...esbuild, package: "actions/checkout", fromVersion: "4", toVersion: "7", scope: "ci",
+		};
+		const out = renderComment([lodash, checkout, tsx]);
+		assert.match(out, /`actions\/checkout` ⚙️ci/);
+	});
+
+	it("tags an indirect dependency", () => {
+		const out = renderComment([lodash, { ...esbuild, scope: "indirect" }, tsx]);
+		assert.match(out, /`esbuild` 📦indirect/);
+	});
+
+	it("says what a dev scope means beneath a single security finding", () => {
+		const out = renderComment([{ ...lodash, scope: "dev" }]);
+		assert.match(out, /build tooling/i);
+		assert.match(out, /run in CI with access to your tokens/i);
+	});
+
+	it("adds no scope note for a runtime security finding", () => {
+		const out = renderComment([{ ...lodash, scope: "runtime" }]);
+		assert.doesNotMatch(out, /build tooling/i);
+	});
+
+	// The guard on the whole feature: scope annotates, it never downranks.
+	it("still reports security for an advisory in a dev dependency", () => {
+		const devLodash: Analyzed = { ...lodash, scope: "dev" };
+		assert.equal(highestLevel([devLodash, esbuild]), "security");
+		assert.match(renderComment([devLodash, esbuild, tsx]), /🚨/);
+	});
+});
+
+describe("isSafeToAutomerge", () => {
+	const at = (level: string): Analyzed => ({ ...esbuild, recommendationLevel: level });
+
+	it("accepts a patch with nothing found", () => {
+		assert.equal(isSafeToAutomerge([at("safe")]), true);
+	});
+
+	it("accepts a minor with nothing found", () => {
+		assert.equal(isSafeToAutomerge([at("likely-safe")]), true);
+	});
+
+	it("rejects a pull request that resolves an advisory", () => {
+		assert.equal(isSafeToAutomerge([at("security")]), false);
+	});
+
+	it("rejects a major bump or a downgrade", () => {
+		assert.equal(isSafeToAutomerge([at("caution")]), false);
+	});
+
+	it("rejects breaking changes on a non-major bump", () => {
+		assert.equal(isSafeToAutomerge([at("review")]), false);
+	});
+
+	it("takes the worst package in a grouped pull request", () => {
+		assert.equal(isSafeToAutomerge([at("safe"), at("likely-safe"), at("security")]), false);
+		assert.equal(isSafeToAutomerge([at("safe"), at("likely-safe")]), true);
+	});
+
+	// A package the analyzer could not check lands on "review", so a PR
+	// containing one is never eligible. Verified through the real record shape.
+	it("rejects a pull request containing a failed analysis", () => {
+		assert.equal(isSafeToAutomerge([at("safe"), failed]), false);
+	});
+
+	// The early-return path sets highest-level "safe" when nothing parsed.
+	// Gating automerge on that would merge an unanalyzed pull request.
+	it("rejects an empty analysis list rather than calling it safe", () => {
+		assert.equal(isSafeToAutomerge([]), false);
 	});
 });

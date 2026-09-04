@@ -3,10 +3,12 @@ import * as github from "@actions/github";
 import { analyzePackageChange } from "@digicatalyst/dep-diff-mcp/dist/analyzer.js";
 import { isDependencyBot, parseDependabotPr, type Ecosystem } from "./dependabot.ts";
 import { parseRenovatePr } from "./renovate.ts";
+import { parseDependabotScopes, parseRenovateScopes, type Scope } from "./scope.ts";
 import {
 	COMMENT_MARKER,
 	capForComment,
 	highestLevel,
+	isSafeToAutomerge,
 	renderComment,
 	LOG_BANNER,
 	SUMMARY_HEADING,
@@ -35,6 +37,9 @@ export async function run(): Promise<void> {
 	const ecosystem = (core.getInput("ecosystem") || "npm") as Ecosystem;
 	const failOn = (core.getInput("fail-on") || "none").trim();
 	const shouldComment = core.getBooleanInput("comment");
+	// Empty disables labelling. Opt-in, because a label that appears unasked may
+	// trigger an automerge workflow the repository already has.
+	const labelName = core.getInput("label").trim();
 
 	const pr = github.context.payload.pull_request;
 	if (!pr) {
@@ -64,6 +69,10 @@ export async function run(): Promise<void> {
 		}
 		core.setOutput("highest-level", "safe");
 		core.setOutput("security-count", "0");
+		// Nothing was analyzed, so nothing is safe to merge unread. "highest-level"
+		// says "safe" here only because there is no risk on record -- which is not
+		// the same claim.
+		core.setOutput("safe-to-automerge", "false");
 		return;
 	}
 
@@ -73,35 +82,59 @@ export async function run(): Promise<void> {
 			`${changes.length - actionCount} in ${ecosystem}, ${actionCount} github-actions.`
 	);
 
-	const analyses: Analyzed[] = await mapLimit(changes, CONCURRENCY, async (c) => {
-		try {
-			return (await analyzePackageChange(
-				// A slashed, unscoped name is a repository coordinate, so the name
-				// itself settles the ecosystem regardless of the configured default.
-				c.ecosystem ?? ecosystem,
-				c.name,
-				c.fromVersion,
-				c.toVersion,
-				token
-			)) as Analyzed;
-		} catch (err) {
-			// Report the failure in place. Dropping it would silently understate risk.
-			core.warning(`Could not analyze ${c.name}: ${(err as Error).message}`);
-			return {
-				package: c.name,
-				error: (err as Error).message,
-				recommendationLevel: "review",
-			};
-		}
-	});
+	const [analyses, commitMessages] = await Promise.all([
+		mapLimit(changes, CONCURRENCY, async (c): Promise<Analyzed> => {
+			try {
+				return (await analyzePackageChange(
+					// A slashed, unscoped name is a repository coordinate, so the name
+					// itself settles the ecosystem regardless of the configured default.
+					c.ecosystem ?? ecosystem,
+					c.name,
+					c.fromVersion,
+					c.toVersion,
+					token
+				)) as Analyzed;
+			} catch (err) {
+				// Report the failure in place. Dropping it would silently understate risk.
+				core.warning(`Could not analyze ${c.name}: ${(err as Error).message}`);
+				return {
+					package: c.name,
+					error: (err as Error).message,
+					recommendationLevel: "review",
+				};
+			}
+		}),
+		// Scope does not feed the analysis, so fetching it alongside costs nothing.
+		fetchCommitMessages(token, pr.number),
+	]);
+
+	// mapLimit preserves order, so analyses and changes stay index-aligned.
+	const scopes = parseDependabotScopes(commitMessages);
+	for (const [name, scope] of parseRenovateScopes(body)) {
+		if (!scopes.has(name)) scopes.set(name, scope);
+	}
+	for (const [i, a] of analyses.entries()) {
+		// Dependabot calls actions/checkout `direct:production`, which is true but
+		// useless -- the reader needs "this runs in CI", not "this is production".
+		const scope: Scope | undefined =
+			changes[i]!.ecosystem === "github-actions" ? "ci" : scopes.get(changes[i]!.name);
+		if (scope) a.scope = scope;
+	}
+	const unscoped = analyses.filter((a) => !a.scope).length;
+	if (unscoped > 0) {
+		core.debug(`No dependency scope found for ${unscoped} of ${analyses.length} package(s).`);
+	}
 
 	const report = renderComment(analyses);
 	const level = highestLevel(analyses);
 	const securityCount = analyses.reduce((n, a) => n + (a.securityFixes?.length ?? 0), 0);
 
+	const safe = isSafeToAutomerge(analyses);
+
 	core.setOutput("highest-level", level);
 	core.setOutput("security-count", String(securityCount));
 	core.setOutput("summary", report);
+	core.setOutput("safe-to-automerge", String(safe));
 	await core.summary.addRaw(`${SUMMARY_HEADING}\n\n${report}`).write();
 
 	// The log is the one surface that cannot be blocked by a fork's read-only
@@ -116,6 +149,11 @@ export async function run(): Promise<void> {
 
 	if (shouldComment) await upsertComment(token, pr.number, capForComment(report));
 
+	if (labelName) {
+		const current = ((pr.labels ?? []) as { name?: string }[]).map((l) => l.name);
+		await reconcileLabel(token, pr.number, labelName, safe, current.includes(labelName));
+	}
+
 	if (failOn !== "none") {
 		const threshold = ORDER.indexOf(failOn);
 		if (threshold === -1) {
@@ -123,6 +161,72 @@ export async function run(): Promise<void> {
 		} else if (ORDER.indexOf(level) <= threshold) {
 			core.setFailed(`Highest risk level is "${level}", at or above the fail-on threshold "${failOn}".`);
 		}
+	}
+}
+
+/**
+ * Dependabot publishes the dependency scope in its commit trailer. Reading it
+ * needs only `pull-requests: read`, which the documented workflow already
+ * grants -- no manifest parsing and no `contents:` permission.
+ *
+ * Failure is debug, not warning: an absent annotation understates nothing, and
+ * a routine warning here would corrode the green all-clear.
+ */
+async function fetchCommitMessages(token: string, issueNumber: number): Promise<string[]> {
+	const octokit = github.getOctokit(token);
+	const { owner, repo } = github.context.repo;
+	try {
+		const commits = await octokit.paginate(octokit.rest.pulls.listCommits, {
+			owner,
+			repo,
+			pull_number: issueNumber,
+			per_page: 100,
+		});
+		return commits.map((c) => c.commit.message);
+	} catch (err) {
+		core.debug(`Could not read pull request commits for dependency scope: ${(err as Error).message}`);
+		return [];
+	}
+}
+
+/**
+ * Keep the label in step with the current analysis, so it holds one invariant:
+ * present if and only if the latest run said safe.
+ *
+ * A stale "safe to merge" label is worse than a stale report, because an
+ * automerge workflow acts on it without reading it -- so a hand-applied label
+ * is stripped too. Anyone wanting to force a merge can merge directly.
+ *
+ * `pull-requests: write` grants both calls; no extra permission is needed.
+ */
+async function reconcileLabel(
+	token: string,
+	issueNumber: number,
+	name: string,
+	safe: boolean,
+	present: boolean
+): Promise<void> {
+	if (safe === present) return;
+	const octokit = github.getOctokit(token);
+	const { owner, repo } = github.context.repo;
+	try {
+		if (safe) {
+			await octokit.rest.issues.addLabels({ owner, repo, issue_number: issueNumber, labels: [name] });
+			core.info(`Labelled "${name}" — no advisories, no breaking changes, patch or minor only.`);
+			return;
+		}
+		await octokit.rest.issues.removeLabel({ owner, repo, issue_number: issueNumber, name });
+		core.info(`Removed "${name}" — this pull request no longer meets the bar.`);
+	} catch (err) {
+		// 404 on removal means the label is already gone, which is the end state
+		// we wanted; anything else the user asked for and did not get.
+		if (!safe && (err as { status?: number }).status === 404) return;
+		// The user opted in by naming a label, so a silent no-op here is a broken
+		// feature rather than a missing annotation.
+		core.warning(
+			`Could not ${safe ? "add" : "remove"} the "${name}" label (${(err as Error).message}). ` +
+				"Grant pull-requests: write, or clear the `label` input to disable labelling."
+		);
 	}
 }
 

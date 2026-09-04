@@ -45,18 +45,44 @@ When something will actually break:
 >
 > [Migration guide →](https://expressjs.com/en/guide/migrating-5.html)
 
-And for a grouped PR, which is where triage actually costs you time:
+And for a grouped PR, which is where triage actually costs you time — one row
+per package, routine ones included, so a quiet row reads as "I checked this"
+rather than "I skipped this":
 
-> ### 2 of 5 updates need a look
->
-> **🔴 Merge first**
-> - `lodash` 4.17.20 → 4.17.21 — closes **Command Injection** (HIGH, fix soon) and 1 more
->
-> **⚠️ Read first**
-> - `express` 4.18.2 → 5.0.0 — 2 breaking changes · [migration guide]
->
-> **✅ Routine** — no advisories, no breaking changes
-> `esbuild`, `tsx`, `zod`
+### 2 of 5 updates need a look
+
+|  | Package | Change | What to know |
+|---|---|---|---|
+| 🚨 | `lodash` | 4.17.20 → 4.17.21 | closes Command Injection (HIGH, fix soon) · 1 more |
+| 🚫 | `actions/checkout` ⚙️ci | 4 → 7 | 3 breaking changes · now requires runner v2.327.1 |
+| ✅ | `esbuild` 🔧dev | 0.28.1 → 0.28.2 | nothing found |
+| ✅ | `tsx` 🔧dev | 4.21.0 → 4.23.13 | nothing found |
+| ✅ | `zod` | 4.3.6 → 4.5.2 | nothing found |
+
+The full list of what breaks sits in a `<details>` block under the table, so
+nothing is truncated anywhere.
+
+### Dependency scope
+
+Packages that do not ship to production are tagged:
+
+| tag | meaning |
+|---|---|
+| `🔧dev` | a development dependency — build tooling, tests, types |
+| `⚙️ci` | a GitHub Actions workflow step |
+| `📦indirect` | a transitive dependency, pulled in by something else |
+
+Runtime dependencies are unmarked, because that is the default case.
+
+**Scope never changes a package's risk level.** A build tool runs in CI holding
+your repository token — that is exactly how the `tj-actions/changed-files`
+attack worked — so a security advisory in one is still reported as a security
+advisory. The tag tells you where the code runs; it does not tell you to worry
+less.
+
+The scope is read from Dependabot's commit trailer, or from Renovate's `Type`
+column where the repository is configured to include one. Where neither is
+available the package is simply left untagged.
 
 ## Usage
 
@@ -119,6 +145,7 @@ No configuration needed — they are detected from the name:
 | `ecosystem` | `npm` | Default for names that do not settle it themselves: `npm` or `pypi`. GitHub Actions bumps are detected from the name. |
 | `comment` | `true` | Post and update a comment on the PR. |
 | `fail-on` | `none` | Fail at this level or worse: `security`, `caution`, `review`, `likely-safe`, `safe`, `none`. |
+| `label` | *(none)* | Label to apply when the PR is safe to automerge, and remove when it stops being. Empty disables labelling. |
 
 ## Outputs
 
@@ -127,6 +154,46 @@ No configuration needed — they are detected from the name:
 | `highest-level` | Riskiest level found across the PR. |
 | `security-count` | Total advisories resolved by the PR. |
 | `summary` | The rendered Markdown report. |
+| `safe-to-automerge` | `true` when no advisories, no breaking changes, and patch/minor only. `false` when nothing could be analyzed. |
+
+### Automerging the boring ones
+
+Most dependency PRs are a patch bump with nothing in the release notes. This
+action can say so in a form your own workflow can act on:
+
+```yaml
+      - uses: DigiCatalyst-Systems/dependabot-risk@v1
+        id: risk
+        with:
+          label: safe-to-automerge
+
+      - if: steps.risk.outputs.safe-to-automerge == 'true'
+        run: gh pr merge --auto --squash "${{ github.event.pull_request.html_url }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+```
+
+`safe-to-automerge` is `true` only when every package in the PR resolved no
+advisories, had no breaking changes in its release notes, and was a patch or
+minor bump. A package the action could not check is never safe, and neither is
+a PR it could not read at all.
+
+The output works on its own — you do not need the label, and reading it needs no
+write permission. Set `label` as well if you want the state visible in the PR
+list, or if you drive automerge from a label rule.
+
+**The label is reconciled on every run.** It is added when the PR qualifies and
+**removed when it stops qualifying** — so if a force-push adds a major bump, the
+label comes off before anything merges it. That also means a hand-applied label
+is stripped on the next unsafe run: a stale "safe to merge" is worse than an
+overridden human, because a bot acts on it without reading. To force a merge,
+merge it directly.
+
+**This action never merges anything itself.** Merging would need
+`contents: write` — write access to your source, from a tool whose whole pitch
+is supply-chain safety. `gh pr merge --auto` above is GitHub's own automerge,
+and it respects your branch protection, required checks and merge queue. The
+action's job is the verdict; the merge stays yours.
 
 ## What it reads
 
