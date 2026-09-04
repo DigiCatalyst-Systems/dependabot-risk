@@ -287,14 +287,14 @@ describe("grouped table", () => {
 
 	it("renders a markdown table with a header", () => {
 		const out = renderComment(four);
-		assert.match(out, /\|\s*\|\s*Package\s*\|\s*Change\s*\|\s*What to know\s*\|/);
+		assert.match(out, /\|\s*\|\s*Package\s*\|\s*Scope\s*\|\s*Change\s*\|\s*What to know\s*\|/);
 		assert.match(out, /\|---\|/);
 	});
 
 	it("marks security, breaking, review and safe distinctly", () => {
 		const out = renderComment(four);
-		assert.match(out, /\| 🚨 \| `lodash` \| 4\.17\.20 → 4\.17\.21 \|/);
-		assert.match(out, /\| 🚫 \| `actions\/setup-node` \| 4 → 7 \|/);
+		assert.match(out, /\| 🚨 \| `lodash` \| — \| 4\.17\.20 → 4\.17\.21 \|/);
+		assert.match(out, /\| 🚫 \| `actions\/setup-node` \| — \| 4 → 7 \|/);
 		assert.match(out, /\| ⚠️ \| `typescript` \|/);
 		assert.match(out, /\| ✅ \| `esbuild` \|/);
 	});
@@ -319,7 +319,7 @@ describe("grouped table", () => {
 	});
 
 	it("says plainly when nothing was found", () => {
-		assert.match(renderComment(four), /\| ✅ \| `esbuild` \| 0\.28\.1 → 0\.28\.2 \| nothing found \|/);
+		assert.match(renderComment(four), /\| ✅ \| `esbuild` \| — \| 0\.28\.1 → 0\.28\.2 \| nothing found \|/);
 	});
 
 	it("escapes a pipe so it cannot break the table", () => {
@@ -383,29 +383,38 @@ describe("per-package details block", () => {
 });
 
 describe("dependency scope", () => {
-	it("tags a dev dependency after its name in the grouped table", () => {
-		const devEsbuild: Analyzed = { ...esbuild, scope: "dev" };
-		const out = renderComment([lodash, devEsbuild, tsx]);
-		assert.match(out, /`esbuild` 🔧dev/);
+	it("gives each package a Scope column entry", () => {
+		const out = renderComment([
+			{ ...lodash, scope: "runtime" },
+			{ ...esbuild, scope: "dev" },
+			{ ...tsx, scope: "indirect" },
+		]);
+		assert.match(out, /\|  \| Package \| Scope \| Change \| What to know \|/);
+		assert.match(out, /\| `lodash` \| runtime \|/);
+		assert.match(out, /\| `esbuild` \| dev \|/);
+		assert.match(out, /\| `tsx` \| indirect \|/);
 	});
 
-	it("leaves a runtime dependency unmarked, because runtime is the default", () => {
-		const out = renderComment([lodash, { ...esbuild, scope: "runtime" }, tsx]);
-		assert.match(out, /`esbuild` \|/);
-		assert.doesNotMatch(out, /🔧|⚙️|📦/);
-	});
-
-	it("tags a github-actions bump as ci", () => {
+	it("writes CI in caps, because it is an initialism", () => {
 		const checkout: Analyzed = {
 			...esbuild, package: "actions/checkout", fromVersion: "4", toVersion: "7", scope: "ci",
 		};
 		const out = renderComment([lodash, checkout, tsx]);
-		assert.match(out, /`actions\/checkout` ⚙️ci/);
+		assert.match(out, /\| `actions\/checkout` \| CI \|/);
 	});
 
-	it("tags an indirect dependency", () => {
-		const out = renderComment([lodash, { ...esbuild, scope: "indirect" }, tsx]);
-		assert.match(out, /`esbuild` 📦indirect/);
+	it("uses an em dash when the scope could not be determined", () => {
+		const out = renderComment([lodash, esbuild, tsx]);
+		assert.match(out, /\| `esbuild` \| — \|/);
+	});
+
+	it("carries no emoji in the scope column", () => {
+		const out = renderComment([
+			{ ...lodash, scope: "runtime" },
+			{ ...esbuild, scope: "dev" },
+			{ ...tsx, scope: "ci" },
+		]);
+		assert.doesNotMatch(out, /🔧|⚙|📦/);
 	});
 
 	it("says what a dev scope means beneath a single security finding", () => {

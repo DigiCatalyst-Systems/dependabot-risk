@@ -30,3 +30,19 @@ Out of scope:
 Release tags `v*.*.*` cannot be moved or deleted — the repository ruleset that enforces this has no bypass actors, including for administrators. **Pin to a full commit SHA if you want the strongest guarantee**, or to `@v1.0.1` for an immutable tag. The `v1` tag moves by design, as the major-version convention requires.
 
 Workflow actions used here are themselves pinned to commit SHAs, and the repository requires SHA pinning.
+
+## Verifying a release
+
+The action runs a bundled `dist/index.js`. Every release from v1.2.0 onward is
+attested with build provenance, tying that bundle to this source and to the
+workflow that built it:
+
+```console
+$ gh attestation verify dist/index.js --repo DigiCatalyst-Systems/dependabot-risk
+```
+
+The signing workflow rebuilds the bundle from `src/` at the release tag and
+fails rather than attest if the rebuild does not match the committed file.
+
+Released `vX.Y.Z` tags are immutable and cannot be moved or deleted by anyone,
+including the maintainers. Only the floating `v1` tag moves.

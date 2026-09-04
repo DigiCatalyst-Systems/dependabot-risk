@@ -40,20 +40,19 @@ const URGENCY: Record<string, string> = {
 };
 
 /**
- * Runtime is the default and stays unmarked -- tagging every row would be a
- * column of restatement. Only the exceptions are worth a reader's attention.
+ * Plain words, no emoji: the marker column already carries the table's visual
+ * load, and a second emoji vocabulary beside it asks the reader to learn two.
+ * "CI" is capitalised because it is an initialism; the rest are ordinary words.
  */
-const SCOPE_TAG: Partial<Record<Scope, string>> = {
-	dev: "\u{1F527}dev",
-	ci: "\u2699\uFE0Fci",
-	indirect: "\u{1F4E6}indirect",
+const SCOPE_LABEL: Record<Scope, string> = {
+	runtime: "runtime",
+	dev: "dev",
+	ci: "CI",
+	indirect: "indirect",
 };
 
-/** Empty for runtime and for an untagged package, so the name stands alone. */
-const tagSuffix = (a: Analyzed) => {
-	const tag = a.scope ? SCOPE_TAG[a.scope] : undefined;
-	return tag ? ` ${tag}` : "";
-};
+/** An em dash, not a blank: the cell should say "not known", not look unfilled. */
+const scopeCell = (a: Analyzed) => (a.scope ? SCOPE_LABEL[a.scope] : "\u2014");
 
 /**
  * Scope is context, never a downgrade: a build tool runs in CI holding the
@@ -254,8 +253,8 @@ function grouped(attention: Analyzed[], routine: Analyzed[], total: number): str
 	const out = [
 		`### ${attention.length} of ${total} update${total === 1 ? "" : "s"} need${attention.length === 1 ? "s" : ""} a look`,
 		"",
-		"|  | Package | Change | What to know |",
-		"|---|---|---|---|",
+		"|  | Package | Scope | Change | What to know |",
+		"|---|---|---|---|---|",
 	];
 
 	// Every package gets a row, routine ones included. A comma-separated
@@ -263,7 +262,9 @@ function grouped(attention: Analyzed[], routine: Analyzed[], total: number): str
 	const all = [...attention, ...routine];
 	for (const a of all) {
 		const change = a.error ? "—" : `${a.fromVersion} → ${a.toVersion}`;
-		out.push(`| ${packageMarker(a)} | \`${a.package}\`${tagSuffix(a)} | ${change} | ${cell(whatToKnow(a))} |`);
+		out.push(
+			`| ${packageMarker(a)} | \`${a.package}\` | ${scopeCell(a)} | ${change} | ${cell(whatToKnow(a))} |`
+		);
 	}
 
 	for (const a of all) {

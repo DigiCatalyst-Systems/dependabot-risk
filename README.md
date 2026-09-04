@@ -51,28 +51,28 @@ rather than "I skipped this":
 
 ### 2 of 5 updates need a look
 
-|  | Package | Change | What to know |
-|---|---|---|---|
-| 🚨 | `lodash` | 4.17.20 → 4.17.21 | closes Command Injection (HIGH, fix soon) · 1 more |
-| 🚫 | `actions/checkout` ⚙️ci | 4 → 7 | 3 breaking changes · now requires runner v2.327.1 |
-| ✅ | `esbuild` 🔧dev | 0.28.1 → 0.28.2 | nothing found |
-| ✅ | `tsx` 🔧dev | 4.21.0 → 4.23.13 | nothing found |
-| ✅ | `zod` | 4.3.6 → 4.5.2 | nothing found |
+|  | Package | Scope | Change | What to know |
+|---|---|---|---|---|
+| 🚨 | `lodash` | runtime | 4.17.20 → 4.17.21 | closes Command Injection (HIGH, fix soon) · 1 more |
+| 🚫 | `actions/checkout` | CI | 4 → 7 | 3 breaking changes · now requires runner v2.327.1 |
+| ✅ | `esbuild` | dev | 0.28.1 → 0.28.2 | nothing found |
+| ✅ | `tsx` | dev | 4.21.0 → 4.23.13 | nothing found |
+| ✅ | `zod` | runtime | 4.3.6 → 4.5.2 | nothing found |
 
 The full list of what breaks sits in a `<details>` block under the table, so
 nothing is truncated anywhere.
 
 ### Dependency scope
 
-Packages that do not ship to production are tagged:
+The **Scope** column says where each package actually runs:
 
-| tag | meaning |
+| scope | meaning |
 |---|---|
-| `🔧dev` | a development dependency — build tooling, tests, types |
-| `⚙️ci` | a GitHub Actions workflow step |
-| `📦indirect` | a transitive dependency, pulled in by something else |
-
-Runtime dependencies are unmarked, because that is the default case.
+| `runtime` | ships to production |
+| `dev` | a development dependency — build tooling, tests, types |
+| `CI` | a GitHub Actions workflow step |
+| `indirect` | a transitive dependency, pulled in by something else |
+| `—` | could not be determined |
 
 **Scope never changes a package's risk level.** A build tool runs in CI holding
 your repository token — that is exactly how the `tj-actions/changed-files`
@@ -129,6 +129,26 @@ which is what we would suggest if you already pin your other actions that way:
 
 Released versions are immutable: a `vX.Y.Z` tag in this repository cannot be
 moved or deleted once pushed, by anyone, including us. Only `v1` moves.
+
+### Verifying what you run
+
+This action ships a bundled `dist/index.js` — about 1.1 MB of compiled
+JavaScript. You should not have to take our word that it matches the source
+beside it. Every release is attested with
+[build provenance](https://docs.github.com/en/actions/security-guides/using-artifact-attestations),
+so you can check:
+
+```console
+$ gh attestation verify dist/index.js --repo DigiCatalyst-Systems/dependabot-risk
+```
+
+The attestation is produced by a workflow that rebuilds the bundle from `src/`
+at the release tag and refuses to sign it if the result differs from what was
+committed — so it certifies a bundle proven to match the source, not merely one
+we uploaded.
+
+Releases from v1.2.0 onward carry attestations; earlier ones predate the
+workflow.
 
 ### Fail the check on risky upgrades
 
