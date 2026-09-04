@@ -115,6 +115,22 @@ export function highestLevel(analyses: Analyzed[]): string {
 	return analyses.reduce((worst, a) => (rank(a) < rank(worst) ? a : worst)).recommendationLevel;
 }
 
+/** Levels that mean no advisories, no breaking changes, and a patch or minor bump. */
+const AUTOMERGE_SAFE = new Set(["safe", "likely-safe"]);
+
+/**
+ * Whether a machine may merge this pull request unread.
+ *
+ * An empty list is deliberately false, not true. `run()` returns early when
+ * nothing parsed and reports `highest-level: safe` -- gating a merge on that
+ * would merge an *unanalyzed* pull request. A package the analyzer could not
+ * check lands on "review", so it fails this test for the same reason.
+ */
+export function isSafeToAutomerge(analyses: Analyzed[]): boolean {
+	if (analyses.length === 0) return false;
+	return AUTOMERGE_SAFE.has(highestLevel(analyses));
+}
+
 export function renderComment(analyses: Analyzed[]): string {
 	const sorted = [...analyses].sort((a, b) => rank(a) - rank(b));
 	const attention = sorted.filter(needsAttention);
