@@ -1,0 +1,56 @@
+# We ship a 1.1 MB bundled dist/index.js, and the people most likely to install
+# this action are the ones who pin by SHA and read what they run. Provenance
+# lets them verify the bundle was built from this source by this workflow,
+# rather than trusting that a committed artifact matches the code beside it.
+#
+#   gh attestation verify dist/index.js --repo DigiCatalyst-Systems/dependabot-risk
+name: attest release build
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag to attest, e.g. v1.2.0"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Both are required by attest-build-provenance: the OIDC token identifies
+      # the workflow, and the attestation is written to the repository.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.event.release.tag_name }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # Attesting the committed bundle would only prove we committed it. Rebuild
+      # from source first and fail if the two differ, so the attestation covers
+      # a bundle we have just shown to match src/.
+      - name: Rebuild and confirm the bundle matches src/
+        run: |
+          npm run build
+          if ! git diff --quiet --exit-code dist/; then
+            echo "::error::dist/ does not match src/ at this tag; refusing to attest."
+            git diff --stat dist/
+            exit 1
+          fi
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/index.js

@@ -130,6 +130,26 @@ which is what we would suggest if you already pin your other actions that way:
 Released versions are immutable: a `vX.Y.Z` tag in this repository cannot be
 moved or deleted once pushed, by anyone, including us. Only `v1` moves.
 
+### Verifying what you run
+
+This action ships a bundled `dist/index.js` — about 1.1 MB of compiled
+JavaScript. You should not have to take our word that it matches the source
+beside it. Every release is attested with
+[build provenance](https://docs.github.com/en/actions/security-guides/using-artifact-attestations),
+so you can check:
+
+```console
+$ gh attestation verify dist/index.js --repo DigiCatalyst-Systems/dependabot-risk
+```
+
+The attestation is produced by a workflow that rebuilds the bundle from `src/`
+at the release tag and refuses to sign it if the result differs from what was
+committed — so it certifies a bundle proven to match the source, not merely one
+we uploaded.
+
+Releases from v1.2.0 onward carry attestations; earlier ones predate the
+workflow.
+
 ### Fail the check on risky upgrades
 
 ```yaml
