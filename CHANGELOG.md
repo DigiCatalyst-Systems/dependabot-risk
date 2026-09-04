@@ -11,6 +11,55 @@ you want to choose when that happens.
 
 ---
 
+## [v1.2.0](https://github.com/DigiCatalyst-Systems/dependabot-risk/releases/tag/v1.2.0) — 2026-09-04 — scope column, build provenance, end-to-end coverage
+
+Dependency scope moves into its own column, releases now carry build provenance you can verify, and the action finally has an end-to-end test.
+
+```
+|    | Package              | Scope    | Change            | What to know                              |
+|----|----------------------|----------|-------------------|-------------------------------------------|
+| 🚨 | `lodash`             | runtime  | 4.17.20 → 4.17.21 | closes Command Injection (HIGH, fix soon) |
+| 🚫 | `actions/checkout`   | CI       | 4 → 7             | 3 breaking changes · now requires runner… |
+| ✅ | `esbuild`            | dev      | 0.28.1 → 0.28.2   | nothing found                             |
+| ✅ | `tough-cookie`       | indirect | 4.1.2 → 4.1.3     | nothing found                             |
+```
+
+### Changed
+
+- **Scope is a column, written in words.** v1.1.0 tagged it inline as `🔧dev` / `⚙️ci` / `📦indirect`, which put a second emoji vocabulary next to the marker column and asked the reader to learn two. It is now `runtime`, `dev`, `CI` and `indirect` in a column of their own — with `CI` capitalised, because it is an initialism.
+
+  `runtime` is stated rather than implied by an absent tag, and `—` means the scope could not be determined: a cell that says "not known" instead of one that looks unfilled.
+
+### Added
+
+- **Build provenance on every release.** This action ships a bundled 1.1 MB `dist/index.js`, and the people most likely to install it are the ones who pin by SHA and read what they run. You no longer have to take our word that the bundle matches the source beside it:
+
+  ```console
+  $ gh attestation verify dist/index.js --repo DigiCatalyst-Systems/dependabot-risk
+  ```
+
+  The signing workflow rebuilds the bundle from `src/` at the release tag and **refuses to attest if the rebuild differs from what was committed** — so the attestation certifies a bundle proven to match the source, not merely one we uploaded.
+
+- **An end-to-end test.** `run()` now runs under test against real Dependabot payloads, covering parsing, ranking, rendering, the outputs, the comment upsert and every label state. Only the two calls that reach the network are stubbed; `@actions/core` reads `INPUT_*` from the environment and writes to `GITHUB_OUTPUT` exactly as a runner drives it.
+
+  This closes a gap worth naming plainly: **`reconcileLabel` shipped in v1.2.0's predecessor having never once executed.** The label add and remove paths were reasoned about but never run. They are now covered.
+
+### Fixed
+
+- The test suite could corrupt its own reporting. When the runner runs a file in a child process it sends V8-serialised results over stdout, and the action writes its report to that same stream — which could interleave and produce `Unable to deserialize cloned data`. Earlier green runs were luck rather than correctness.
+
+### Internal
+
+`run()` moved from `src/main.ts` to `src/action.ts`, leaving `main.ts` as a three-line entry point. Importing `main.ts` previously *ran* the action, which is why no end-to-end test existed. No behaviour change.
+
+---
+
+98 tests, up from 92. Consumes `dep-diff-mcp` 0.3.2, unchanged since v1.0.3.
+
+Earlier releases predate the attestation workflow and carry no provenance.
+
+---
+
 ## [v1.1.0](https://github.com/DigiCatalyst-Systems/dependabot-risk/releases/tag/v1.1.0) — 2026-09-04 — dependency scope, and safe-to-automerge
 
 The report now says **where** a dependency runs, and when a pull request is boring enough for a machine to merge.
