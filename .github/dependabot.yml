@@ -4,13 +4,13 @@ updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     open-pull-requests-limit: 5
     groups:
       # dist/ is a committed bundle, and Dependabot cannot rebuild it -- every
       # npm pull request therefore fails the drift check until a maintainer
       # runs `npm run build` on the branch and commits the result. Grouping
-      # makes that one rebuild per week rather than one per package.
+      # makes that one rebuild per month rather than one per package.
       #
       # That manual step is the right shape for a bundled action: a runtime
       # dependency bump changes what executes on every consumer's runner, so
@@ -25,7 +25,7 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     groups:
       # Every action lives in the same handful of workflow files, so one pull
       # request per action means each merge leaves the rest conflicting.
