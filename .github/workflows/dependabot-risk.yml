@@ -1,0 +1,30 @@
+name: Dependabot risk
+
+on: pull_request
+
+concurrency:
+  group: dependabot-risk-${{ github.ref }}
+  cancel-in-progress: true
+
+# The report is a pull request comment. Nothing here writes to repository
+# contents, and Dependabot's token is read-only against the code either way.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  risk:
+    # Gate on who opened the pull request, not github.actor: the actor is
+    # whoever triggered the run, so anyone reopening or pushing to the bot's
+    # branch would otherwise skip the check. A skipped job bills nothing.
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Reads the version bumps out of the pull request body, resolves
+      # advisories against OSV and breaking changes against the release notes,
+      # then posts one comment and keeps it updated. fail-on is left at its
+      # default: the report is for the reader, and CI is already the gate.
+      # Pinned to a SHA: this job holds pull-requests: write, and a moved
+      # tag on the action would run unreviewed code with it.
+      - uses: DigiCatalyst-Systems/dependabot-risk@b52f928fe6f146f7aa29d5c820d7cd1cc57ece41 # v1.2.1
