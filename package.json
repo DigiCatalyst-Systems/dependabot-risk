@@ -8,6 +8,7 @@
 		"build": "esbuild src/main.ts --bundle --platform=node --target=node24 --format=esm --outfile=dist/index.js --banner:js=\"import{createRequire}from'node:module';const require=createRequire(import.meta.url);\"",
 		"changelog": "node scripts/generate-changelog.mjs",
 		"test": "node --import tsx --test tests/*.test.ts",
+		"verify": "sh scripts/verify.sh",
 		"typecheck": "tsc --noEmit"
 	},
 	"license": "MIT",

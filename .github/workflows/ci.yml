@@ -1,13 +1,20 @@
 name: CI
 
+# Pull requests only. A merge to main is the commit the pull request already
+# tested, so running the suite again there spent a run for no new signal. A new
+# push to the pull request cancels the run it supersedes. The same checks run
+# locally before every push (.githooks/pre-push, scripts/verify.sh).
 on:
-  push:
-    branches: [main]
   pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
