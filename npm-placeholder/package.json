@@ -11,7 +11,7 @@
 	"bugs": {
 		"url": "https://github.com/DigiCatalyst-Systems/dependabot-risk/issues"
 	},
-	"author": "Kaustubh Ghodke",
+	"author": "DigiCatalyst Systems",
 	"license": "MIT",
 	"files": ["README.md", "LICENSE"]
 }
