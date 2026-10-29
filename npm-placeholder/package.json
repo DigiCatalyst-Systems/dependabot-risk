@@ -1,6 +1,6 @@
 {
 	"name": "dependabot-risk",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "Not an npm package — this name points at the Dependabot Risk Report GitHub Action. See the repository.",
 	"keywords": ["dependabot", "renovate", "github-actions", "security", "dependencies"],
 	"homepage": "https://github.com/DigiCatalyst-Systems/dependabot-risk#readme",
