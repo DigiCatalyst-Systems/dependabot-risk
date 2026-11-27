@@ -11,6 +11,42 @@ you want to choose when that happens.
 
 ---
 
+## [v1.2.3](https://github.com/DigiCatalyst-Systems/dependabot-risk/releases/tag/v1.2.3) — 2026-11-27 — v1.2.3 - patch bundled undici advisories
+
+A security release. The bundled `dist/index.js` ships undici 6.29.1 (was 6.28.0), which the action uses for every GitHub API call through `@actions/github`. No behaviour changes.
+
+### Security
+
+undici 6.28.0 to 6.29.1 fixes these advisories in the bundled code:
+
+| Severity | Advisory | Issue |
+|---|---|---|
+| high | [GHSA-2m5v-pch6-74hx](https://github.com/advisories/GHSA-2m5v-pch6-74hx) | TLS certificate validation bypass via dropped tls options in Agent |
+| high | [GHSA-qrxm-fqhp-jwvm](https://github.com/advisories/GHSA-qrxm-fqhp-jwvm) | Denial of Service via TLS 1.2 certificate-changing renegotiation |
+| high | [GHSA-xjj6-f33q-929c](https://github.com/advisories/GHSA-xjj6-f33q-929c) | Denial of Service via unhandled error on excessive content-encodings |
+| high | [GHSA-rfgv-xxqx-mfg5](https://github.com/advisories/GHSA-rfgv-xxqx-mfg5) | Denial of Service via unrequested WebSocket subprotocol |
+| moderate | [GHSA-4qv8-2p9j-2685](https://github.com/advisories/GHSA-4qv8-2p9j-2685) | Denial of Service via unbounded memory in the EventSource parser |
+| moderate | [GHSA-9fm3-97px-rjf6](https://github.com/advisories/GHSA-9fm3-97px-rjf6) | WebSocket client Denial of Service via unbounded automatic PONG buffering |
+| moderate | [GHSA-3wwx-pv8p-q78v](https://github.com/advisories/GHSA-3wwx-pv8p-q78v) | Denial of Service via unhandled error in WebSocket permessage-deflate decompression |
+| low | [GHSA-r53p-7pc4-xj5r](https://github.com/advisories/GHSA-r53p-7pc4-xj5r) | Downstream response splitting via retry interceptor |
+
+The action only talks to the GitHub API, so practical exposure was low, but every advisory above is now out of the code your workflow runs.
+
+### Maintenance
+
+- `npm audit` is clean. The remaining fixes (proxy-addr, body-parser, zod, the MCP SDK, hono, fast-uri, ip-address, qs) were in install-time dependencies that are not part of `dist/index.js`.
+- `actions/setup-node` 7.1.0 and `@types/node` 26.6.11 in CI.
+
+### Upgrading
+
+Workflows on `@v1` pick this up automatically. Workflows pinned to the v1.2.2 commit SHA need the new SHA: `c8e6aaa81ae26a08854f6414bd55081efa42c787`.
+
+---
+
+114 tests. Verify the bundle with `gh attestation verify dist/index.js --repo DigiCatalyst-Systems/dependabot-risk`.
+
+---
+
 ## [v1.2.2](https://github.com/DigiCatalyst-Systems/dependabot-risk/releases/tag/v1.2.2) — 2026-11-27 — v1.2.2 - route Dependabot pull requests by their branch
 
 A public workflow running this action with `ecosystem: auto` got a report in which every npm package read `could not check — PyPI returned 404 for lucide-react`. The input was passed to the analyzer unchecked, and the analyzer sends anything that is not npm to PyPI.
