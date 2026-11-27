@@ -12,7 +12,7 @@ inputs:
     required: false
     default: ${{ github.token }}
   ecosystem:
-    description: "Default ecosystem for names that do not settle it themselves: npm or pypi. GitHub Actions bumps are detected from the name and ignore this."
+    description: "Registry for packages the pull request does not settle itself: npm or pypi. Dependabot pull requests name their package manager in the branch, and GitHub Actions bumps are detected from the name; both ignore this."
     required: false
     default: "npm"
   comment:
