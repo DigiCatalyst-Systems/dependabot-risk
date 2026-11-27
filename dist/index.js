@@ -27305,6 +27305,42 @@ var clean = (v) => v.replace(/[.,;]+$/, "");
 function unsupportedEcosystem(name) {
   return /^[^\s:/@]+:[^\s:/@]+$/.test(name) ? "Maven" : void 0;
 }
+var BRANCH_SUPPORTED = {
+  npm_and_yarn: "npm",
+  bun: "npm",
+  pip: "pypi",
+  uv: "pypi",
+  github_actions: "github-actions"
+};
+var BRANCH_UNSUPPORTED = {
+  bundler: "Bundler",
+  cargo: "Cargo",
+  composer: "Composer",
+  devcontainers: "Dev Containers",
+  docker: "Docker",
+  docker_compose: "Docker Compose",
+  dotnet_sdk: ".NET SDK",
+  elm: "Elm",
+  go_modules: "Go modules",
+  gradle: "Gradle",
+  helm: "Helm",
+  hex: "Hex",
+  maven: "Maven",
+  nuget: "NuGet",
+  pub: "pub",
+  submodules: "Git submodules",
+  swift: "Swift",
+  terraform: "Terraform"
+};
+var DEPENDABOT_BRANCH = /^dependabot[/-]([a-z0-9_]+)[/-]/;
+function ecosystemFromBranch(ref) {
+  const manager = ref?.match(DEPENDABOT_BRANCH)?.[1];
+  if (!manager) return void 0;
+  const ecosystem = BRANCH_SUPPORTED[manager];
+  if (ecosystem) return { ecosystem };
+  const unsupported = BRANCH_UNSUPPORTED[manager];
+  return unsupported ? { unsupported } : void 0;
+}
 function parseDependabotPr(title, body) {
   const found = [];
   const push = (name, from, to) => {
@@ -27677,6 +27713,16 @@ var DEFAULTS2 = {
   analyze: (ecosystem, name, from, to, token) => analyzePackageChange(ecosystem, name, from, to, token),
   getOctokit: (token) => getOctokit(token)
 };
+var DEFAULT_ECOSYSTEMS = ["npm", "pypi"];
+function routeChange(c, branch, fallback) {
+  if (branch) return branch;
+  const missing = unsupportedEcosystem(c.name);
+  if (missing) return { unsupported: missing };
+  if (c.ecosystem) return { ecosystem: c.ecosystem };
+  if (fallback) return { ecosystem: fallback };
+  return { unknown: true };
+}
+var isAction = (r) => "ecosystem" in r && r.ecosystem === "github-actions";
 async function mapLimit(items, limit, fn) {
   const out = new Array(items.length);
   let next = 0;
@@ -27692,7 +27738,14 @@ async function mapLimit(items, limit, fn) {
 async function run(overrides = {}) {
   const deps = { ...DEFAULTS2, ...overrides };
   const token = getInput("github-token", { required: true });
-  const ecosystem = getInput("ecosystem") || "npm";
+  const ecosystemInput = getInput("ecosystem").trim();
+  const wanted = (ecosystemInput || "npm").toLowerCase();
+  const fallback = DEFAULT_ECOSYSTEMS.includes(wanted) ? wanted : void 0;
+  if (!fallback) {
+    warning(
+      `The ecosystem input "${ecosystemInput}" is not npm or pypi. Packages whose pull request does not settle their registry will be reported as unchecked.`
+    );
+  }
   const failOn = (getInput("fail-on") || "none").trim();
   const shouldComment = getBooleanInput("comment");
   const labelName = getInput("label").trim();
@@ -27719,34 +27772,42 @@ async function run(overrides = {}) {
     setOutput("safe-to-automerge", "false");
     return;
   }
-  const actionCount = changes.filter((c) => c.ecosystem === "github-actions").length;
-  const unsupported = changes.filter((c) => unsupportedEcosystem(c.name));
+  const branch = ecosystemFromBranch(pr.head?.ref);
+  const routes = changes.map((c) => routeChange(c, branch, fallback));
+  const count = (pred) => routes.filter(pred).length;
+  const unsupported = routes.filter((r) => "unsupported" in r);
   info(
-    `Analyzing ${changes.length} package change(s): ${changes.length - actionCount - unsupported.length} in ${ecosystem}, ${actionCount} github-actions, ${unsupported.length} unsupported.`
+    `Analyzing ${changes.length} package change(s): ${count((r) => "ecosystem" in r && r.ecosystem === "npm")} npm, ${count((r) => "ecosystem" in r && r.ecosystem === "pypi")} pypi, ${count((r) => "ecosystem" in r && r.ecosystem === "github-actions")} github-actions, ${unsupported.length} unsupported, ${count((r) => "unknown" in r)} unplaced.`
   );
   if (unsupported.length > 0) {
     notice(
-      `${unsupported.length} of ${changes.length} package(s) are ${unsupportedEcosystem(unsupported[0].name)}, which this action does not support yet. It covers npm, PyPI and GitHub Actions.`
+      `${unsupported.length} of ${changes.length} package(s) are ${unsupported[0].unsupported}, which this action does not support yet. It covers npm, PyPI and GitHub Actions.`
     );
   }
   const octokit = deps.getOctokit(token);
   const [analyses, commitMessages] = await Promise.all([
-    mapLimit(changes, CONCURRENCY, async (c) => {
-      const missing = unsupportedEcosystem(c.name);
-      if (missing) {
+    mapLimit(changes.map((c, i) => [c, routes[i]]), CONCURRENCY, async ([c, route]) => {
+      if ("unsupported" in route) {
         return {
           package: c.name,
           fromVersion: c.fromVersion,
           toVersion: c.toVersion,
-          error: `${missing} is not supported yet \u2014 this action covers npm, PyPI and GitHub Actions.`,
+          error: `${route.unsupported} is not supported yet \u2014 this action covers npm, PyPI and GitHub Actions.`,
+          recommendationLevel: "review"
+        };
+      }
+      if ("unknown" in route) {
+        return {
+          package: c.name,
+          fromVersion: c.fromVersion,
+          toVersion: c.toVersion,
+          error: "it is not clear whether this is an npm or a PyPI package. Set the `ecosystem` input to `npm` or `pypi`.",
           recommendationLevel: "review"
         };
       }
       try {
         return await deps.analyze(
-          // A slashed, unscoped name is a repository coordinate, so the name
-          // itself settles the ecosystem regardless of the configured default.
-          c.ecosystem ?? ecosystem,
+          route.ecosystem,
           c.name,
           c.fromVersion,
           c.toVersion,
@@ -27769,7 +27830,7 @@ async function run(overrides = {}) {
     if (!scopes.has(name)) scopes.set(name, scope);
   }
   for (const [i, a] of analyses.entries()) {
-    const scope = changes[i].ecosystem === "github-actions" ? "ci" : scopes.get(changes[i].name);
+    const scope = isAction(routes[i]) ? "ci" : scopes.get(changes[i].name);
     if (scope) a.scope = scope;
   }
   const unscoped = analyses.filter((a) => !a.scope).length;

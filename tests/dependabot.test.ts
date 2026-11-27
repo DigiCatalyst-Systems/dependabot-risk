@@ -1,6 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseDependabotPr, isDependencyBot, unsupportedEcosystem } from "../src/dependabot.ts";
+import {
+	parseDependabotPr,
+	isDependencyBot,
+	unsupportedEcosystem,
+	ecosystemFromBranch,
+} from "../src/dependabot.ts";
 
 // Fixtures below are real Dependabot output from this repository's own PRs,
 // trimmed to the lines the parser reads.
@@ -179,5 +184,44 @@ describe("unsupportedEcosystem", () => {
 		assert.equal(unsupportedEcosystem("@types/node"), undefined);
 		assert.equal(unsupportedEcosystem("actions/checkout"), undefined);
 		assert.equal(unsupportedEcosystem("socket.io"), undefined);
+	});
+});
+
+describe("ecosystemFromBranch", () => {
+	// Dependabot names its head branch dependabot/<package-manager>/<directory>/<name>,
+	// which settles the registry before any package name is read.
+	it("reads npm from an npm_and_yarn branch in a subdirectory", () => {
+		assert.deepEqual(
+			ecosystemFromBranch("dependabot/npm_and_yarn/apps/sak_agent_dashboard/dashboard-minor-patch-1a8f7d5dec"),
+			{ ecosystem: "npm" }
+		);
+	});
+
+	it("reads PyPI from pip and uv branches", () => {
+		assert.deepEqual(ecosystemFromBranch("dependabot/pip/django-5.2.1"), { ecosystem: "pypi" });
+		assert.deepEqual(ecosystemFromBranch("dependabot/uv/httpx-0.28.1"), { ecosystem: "pypi" });
+	});
+
+	it("reads GitHub Actions from a github_actions branch", () => {
+		assert.deepEqual(
+			ecosystemFromBranch("dependabot/github_actions/github/codeql-action/analyze-4.39.4"),
+			{ ecosystem: "github-actions" }
+		);
+	});
+
+	it("honours the hyphen separator option", () => {
+		assert.deepEqual(ecosystemFromBranch("dependabot-npm_and_yarn-zod-4.5.2"), { ecosystem: "npm" });
+	});
+
+	it("names an ecosystem the action does not cover", () => {
+		assert.deepEqual(ecosystemFromBranch("dependabot/docker/bitnami/redis-8.0"), { unsupported: "Docker" });
+		assert.deepEqual(ecosystemFromBranch("dependabot/cargo/serde-1.0.220"), { unsupported: "Cargo" });
+	});
+
+	it("settles nothing for a branch it does not recognise", () => {
+		assert.equal(ecosystemFromBranch(undefined), undefined);
+		assert.equal(ecosystemFromBranch("renovate/zod-4.x"), undefined);
+		assert.equal(ecosystemFromBranch("feature/npm_and_yarn"), undefined);
+		assert.equal(ecosystemFromBranch("dependabot/some_future_manager/x-1.0"), undefined);
 	});
 });

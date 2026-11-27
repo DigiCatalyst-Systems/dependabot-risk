@@ -2,9 +2,11 @@ import * as core from "@actions/core";
 import * as github from "@actions/github";
 import { analyzePackageChange } from "@digicatalyst/dep-diff-mcp/dist/analyzer.js";
 import {
+	ecosystemFromBranch,
 	isDependencyBot,
 	parseDependabotPr,
 	unsupportedEcosystem,
+	type DependabotChange,
 	type Ecosystem,
 } from "./dependabot.ts";
 import { parseRenovatePr } from "./renovate.ts";
@@ -47,6 +49,33 @@ const DEFAULTS: Deps = {
 	getOctokit: (token) => github.getOctokit(token),
 };
 
+const DEFAULT_ECOSYSTEMS: readonly Ecosystem[] = ["npm", "pypi"];
+
+/** Where one change goes: a registry, an ecosystem named as unsupported, or nowhere known. */
+type Route = { ecosystem: Ecosystem } | { unsupported: string } | { unknown: true };
+
+/**
+ * The pull request settles the registry wherever it can, and the `ecosystem`
+ * input only fills the gaps. A Dependabot branch names its package manager for
+ * every package at once, so it outranks anything read from a package name.
+ */
+function routeChange(
+	c: DependabotChange,
+	branch: ReturnType<typeof ecosystemFromBranch>,
+	fallback: Ecosystem | undefined
+): Route {
+	if (branch) return branch;
+	const missing = unsupportedEcosystem(c.name);
+	if (missing) return { unsupported: missing };
+	// A slashed, unscoped name is a repository coordinate, so the name
+	// itself settles the ecosystem regardless of the configured default.
+	if (c.ecosystem) return { ecosystem: c.ecosystem };
+	if (fallback) return { ecosystem: fallback };
+	return { unknown: true };
+}
+
+const isAction = (r: Route) => "ecosystem" in r && r.ecosystem === "github-actions";
+
 /** Small bounded-concurrency map, so a 30-package group does not open 30 sockets. */
 async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
 	const out = new Array<R>(items.length);
@@ -64,7 +93,19 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 export async function run(overrides: Partial<Deps> = {}): Promise<void> {
 	const deps: Deps = { ...DEFAULTS, ...overrides };
 	const token = core.getInput("github-token", { required: true });
-	const ecosystem = (core.getInput("ecosystem") || "npm") as Ecosystem;
+	const ecosystemInput = core.getInput("ecosystem").trim();
+	const wanted = (ecosystemInput || "npm").toLowerCase() as Ecosystem;
+	// An unknown value used to reach the analyzer unchecked, which sends anything
+	// that is not npm to PyPI: `ecosystem: auto` reported every npm package as a
+	// PyPI 404. Without a valid default, a package the pull request does not
+	// place is reported as unchecked rather than guessed at.
+	const fallback = DEFAULT_ECOSYSTEMS.includes(wanted) ? wanted : undefined;
+	if (!fallback) {
+		core.warning(
+			`The ecosystem input "${ecosystemInput}" is not npm or pypi. Packages whose ` +
+				"pull request does not settle their registry will be reported as unchecked."
+		);
+	}
 	const failOn = (core.getInput("fail-on") || "none").trim();
 	const shouldComment = core.getBooleanInput("comment");
 	// Empty disables labelling. Opt-in, because a label that appears unasked may
@@ -106,45 +147,55 @@ export async function run(overrides: Partial<Deps> = {}): Promise<void> {
 		return;
 	}
 
-	const actionCount = changes.filter((c) => c.ecosystem === "github-actions").length;
-	const unsupported = changes.filter((c) => unsupportedEcosystem(c.name));
+	const branch = ecosystemFromBranch((pr.head as { ref?: string } | undefined)?.ref);
+	const routes = changes.map((c) => routeChange(c, branch, fallback));
+	const count = (pred: (r: Route) => boolean) => routes.filter(pred).length;
+	const unsupported = routes.filter((r): r is { unsupported: string } => "unsupported" in r);
 	core.info(
 		`Analyzing ${changes.length} package change(s): ` +
-			`${changes.length - actionCount - unsupported.length} in ${ecosystem}, ` +
-			`${actionCount} github-actions, ${unsupported.length} unsupported.`
+			`${count((r) => "ecosystem" in r && r.ecosystem === "npm")} npm, ` +
+			`${count((r) => "ecosystem" in r && r.ecosystem === "pypi")} pypi, ` +
+			`${count((r) => "ecosystem" in r && r.ecosystem === "github-actions")} github-actions, ` +
+			`${unsupported.length} unsupported, ${count((r) => "unknown" in r)} unplaced.`
 	);
 	// One notice for the whole pull request. A warning per package would bury the
 	// report on a repository this action does not cover yet.
 	if (unsupported.length > 0) {
 		core.notice(
 			`${unsupported.length} of ${changes.length} package(s) are ` +
-				`${unsupportedEcosystem(unsupported[0]!.name)}, which this action does not support yet. ` +
+				`${unsupported[0]!.unsupported}, which this action does not support yet. ` +
 				"It covers npm, PyPI and GitHub Actions."
 		);
 	}
 
 	const octokit = deps.getOctokit(token);
 	const [analyses, commitMessages] = await Promise.all([
-		mapLimit(changes, CONCURRENCY, async (c): Promise<Analyzed> => {
+		mapLimit(changes.map((c, i) => [c, routes[i]!] as const), CONCURRENCY, async ([c, route]): Promise<Analyzed> => {
 			// Say which ecosystem is missing rather than letting the name reach a
 			// registry that cannot possibly hold it. "npm returned 404 for
 			// org.springframework:spring-core" reads as a broken action; on a Java
 			// repository every row would say it.
-			const missing = unsupportedEcosystem(c.name);
-			if (missing) {
+			if ("unsupported" in route) {
 				return {
 					package: c.name,
 					fromVersion: c.fromVersion,
 					toVersion: c.toVersion,
-					error: `${missing} is not supported yet — this action covers npm, PyPI and GitHub Actions.`,
+					error: `${route.unsupported} is not supported yet — this action covers npm, PyPI and GitHub Actions.`,
+					recommendationLevel: "review",
+				};
+			}
+			if ("unknown" in route) {
+				return {
+					package: c.name,
+					fromVersion: c.fromVersion,
+					toVersion: c.toVersion,
+					error: "it is not clear whether this is an npm or a PyPI package. Set the `ecosystem` input to `npm` or `pypi`.",
 					recommendationLevel: "review",
 				};
 			}
 			try {
 				return await deps.analyze(
-					// A slashed, unscoped name is a repository coordinate, so the name
-					// itself settles the ecosystem regardless of the configured default.
-					c.ecosystem ?? ecosystem,
+					route.ecosystem,
 					c.name,
 					c.fromVersion,
 					c.toVersion,
@@ -173,7 +224,7 @@ export async function run(overrides: Partial<Deps> = {}): Promise<void> {
 		// Dependabot calls actions/checkout `direct:production`, which is true but
 		// useless -- the reader needs "this runs in CI", not "this is production".
 		const scope: Scope | undefined =
-			changes[i]!.ecosystem === "github-actions" ? "ci" : scopes.get(changes[i]!.name);
+			isAction(routes[i]!) ? "ci" : scopes.get(changes[i]!.name);
 		if (scope) a.scope = scope;
 	}
 	const unscoped = analyses.filter((a) => !a.scope).length;

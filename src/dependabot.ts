@@ -39,6 +39,58 @@ export function unsupportedEcosystem(name: string): string | undefined {
 	return /^[^\s:/@]+:[^\s:/@]+$/.test(name) ? "Maven" : undefined;
 }
 
+/**
+ * Dependabot names its head branch `dependabot/<package-manager>/...`, which
+ * settles the registry for every package in the pull request. Package names
+ * cannot: `bitnami/redis` on a Docker branch looks exactly like an action
+ * reference, and a bare `lucide-react` could be npm or PyPI.
+ */
+const BRANCH_SUPPORTED: Record<string, Ecosystem> = {
+	npm_and_yarn: "npm",
+	bun: "npm",
+	pip: "pypi",
+	uv: "pypi",
+	github_actions: "github-actions",
+};
+
+const BRANCH_UNSUPPORTED: Record<string, string> = {
+	bundler: "Bundler",
+	cargo: "Cargo",
+	composer: "Composer",
+	devcontainers: "Dev Containers",
+	docker: "Docker",
+	docker_compose: "Docker Compose",
+	dotnet_sdk: ".NET SDK",
+	elm: "Elm",
+	go_modules: "Go modules",
+	gradle: "Gradle",
+	helm: "Helm",
+	hex: "Hex",
+	maven: "Maven",
+	nuget: "NuGet",
+	pub: "pub",
+	submodules: "Git submodules",
+	swift: "Swift",
+	terraform: "Terraform",
+};
+
+// The separator is configurable, and `/` and `-` are the two in use. Package
+// manager names hold underscores but never hyphens, so either reads cleanly.
+const DEPENDABOT_BRANCH = /^dependabot[/-]([a-z0-9_]+)[/-]/;
+
+export function ecosystemFromBranch(
+	ref: string | undefined
+): { ecosystem: Ecosystem } | { unsupported: string } | undefined {
+	const manager = ref?.match(DEPENDABOT_BRANCH)?.[1];
+	if (!manager) return undefined;
+	const ecosystem = BRANCH_SUPPORTED[manager];
+	if (ecosystem) return { ecosystem };
+	const unsupported = BRANCH_UNSUPPORTED[manager];
+	// A manager this list has never heard of settles nothing; guessing is worse
+	// than falling back to the configured default.
+	return unsupported ? { unsupported } : undefined;
+}
+
 export function parseDependabotPr(title: string, body?: string): DependabotChange[] {
 	const found: DependabotChange[] = [];
 	const push = (name: string, from: string, to: string) => {

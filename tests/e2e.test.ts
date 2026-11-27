@@ -120,8 +120,10 @@ async function runAction(
 			: (write as (...a: unknown[]) => boolean)(chunk, ...rest)) as typeof process.stdout.write;
 	try {
 		await run({
-			analyze: async (_eco: string, name: string) =>
-				analyses[name] ?? analyzed(name, "0", "1", "safe"),
+			analyze: async (eco: string, name: string) => {
+				calls.push({ op: "analyze", args: { eco, name } });
+				return analyses[name] ?? analyzed(name, "0", "1", "safe");
+			},
 			getOctokit: () => fakeOctokit(calls, { comments }) as never,
 		});
 	} finally {
@@ -271,5 +273,79 @@ describe("end to end", () => {
 		assert.equal(outputs["highest-level"], "safe");
 		assert.equal(outputs["safe-to-automerge"], "false");
 		assert.equal(calls.filter((c) => c.op === "addLabels").length, 0);
+	});
+	// Sak-Family-Agent#2095: `ecosystem: auto` fell through to PyPI, so an npm
+	// group bump reported "PyPI returned 404 for lucide-react".
+	it("routes by the Dependabot branch, whatever the ecosystem input says", async () => {
+		const calls: Call[] = [];
+		await runAction(
+			{
+				number: 2095,
+				title: "chore(deps): bump the dashboard-minor-patch group in /apps/sak_agent_dashboard with 2 updates",
+				body: [
+					"Bumps the dashboard-minor-patch group in /apps/sak_agent_dashboard with 2 updates: lucide-react and recharts.",
+					"",
+					"Updates `lucide-react` from 0.555.0 to 0.556.0",
+					"Updates `recharts` from 3.5.0 to 3.5.1",
+				].join("\n"),
+				head: { ref: "dependabot/npm_and_yarn/apps/sak_agent_dashboard/dashboard-minor-patch-1a8f7d5dec" },
+				user: { login: "dependabot[bot]" }, labels: [],
+			},
+			{ ecosystem: "pypi" },
+			{},
+			calls
+		);
+		const routed = calls.filter((c) => c.op === "analyze").map((c) => c.args.eco);
+		assert.deepEqual(routed, ["npm", "npm"]);
+	});
+
+	it("names the ecosystem a Dependabot branch declares instead of guessing from the name", async () => {
+		const calls: Call[] = [];
+		const { outputs } = await runAction(
+			{
+				number: 7, title: "chore(deps): bump the images group with 2 updates",
+				body: [
+					"Bumps the images group with 2 updates: bitnami/redis and bitnami/postgresql.",
+					"",
+					"Updates `bitnami/redis` from 7.4 to 8.0",
+					"Updates `bitnami/postgresql` from 17.5 to 17.6",
+				].join("\n"),
+				head: { ref: "dependabot/docker/images-1f2e3d4c5b" },
+				user: { login: "dependabot[bot]" }, labels: [],
+			},
+			{ label: "safe-to-automerge" },
+			{},
+			calls
+		);
+		// A slashed name looks like an action reference; the branch says otherwise.
+		assert.equal(calls.filter((c) => c.op === "analyze").length, 0);
+		assert.match(outputs.summary!, /Docker is not supported yet/);
+		// Nor is it CI: the scope follows the route, not the shape of the name.
+		assert.match(outputs.summary!, /\| `bitnami\/redis` \| — \|/);
+		assert.equal(outputs["safe-to-automerge"], "false");
+	});
+
+	it("says it cannot tell the registry rather than guessing when the input is invalid", async () => {
+		const calls: Call[] = [];
+		const { outputs } = await runAction(
+			{ number: 7, title: "chore(deps): bump zod from 4.3.6 to 4.5.2", body: "", head: { ref: "deps/zod" }, user: { login: "someone" }, labels: [] },
+			{ ecosystem: "auto" },
+			{},
+			calls
+		);
+		assert.equal(calls.filter((c) => c.op === "analyze").length, 0);
+		assert.match(outputs.summary!, /not clear whether this is an npm or a PyPI package/);
+		assert.notEqual(outputs["highest-level"], "safe");
+	});
+
+	it("accepts the ecosystem input in any case", async () => {
+		const calls: Call[] = [];
+		await runAction(
+			{ number: 7, title: "chore(deps): bump django from 5.2.0 to 5.2.1", body: "", user: { login: "someone" }, labels: [] },
+			{ ecosystem: " PyPI " },
+			{},
+			calls
+		);
+		assert.deepEqual(calls.filter((c) => c.op === "analyze").map((c) => c.args.eco), ["pypi"]);
 	});
 });

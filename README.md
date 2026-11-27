@@ -179,7 +179,7 @@ No configuration needed — they are detected from the name:
 | Input | Default | Description |
 |---|---|---|
 | `github-token` | `${{ github.token }}` | Reads release notes and posts the comment. |
-| `ecosystem` | `npm` | Default for names that do not settle it themselves: `npm` or `pypi`. GitHub Actions bumps are detected from the name. |
+| `ecosystem` | `npm` | Registry for packages the pull request does not settle itself: `npm` or `pypi`. Dependabot pull requests are routed by their branch name and GitHub Actions bumps by their name, whatever this says. Any other value is reported with a warning, and unplaced packages show as unchecked. |
 | `comment` | `true` | Post and update a comment on the PR. |
 | `fail-on` | `none` | Fail at this level or worse: `security`, `caution`, `review`, `likely-safe`, `safe`, `none`. |
 | `label` | *(none)* | Label to apply when the PR is safe to automerge, and remove when it stops being. Empty disables labelling. |
@@ -251,6 +251,13 @@ rather than guessed at — a Maven or Gradle coordinate like
 instead of being sent to the npm registry, which would 404 and read as a broken
 action. Gradle version-catalog aliases (the `Bumps \`media3\`` line that
 summarises the coordinates beneath it) are not treated as packages at all.
+
+A Dependabot pull request names its package manager in its branch
+(`dependabot/npm_and_yarn/...`, `dependabot/pip/...`, `dependabot/docker/...`), and
+that settles the registry for every package in it, ahead of the `ecosystem` input and
+of anything read from a package name. So an npm bump in a Python repository's
+`frontend/` folder goes to npm, and a Docker image such as `bitnami/redis` is named as
+Docker rather than mistaken for an action.
 
 npm, PyPI, and **GitHub Actions** are analyzed. An `actions/checkout` bump needs no
 configuration: a slashed, unscoped name is a repository coordinate, so it is detected
