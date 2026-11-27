@@ -11,6 +11,28 @@ you want to choose when that happens.
 
 ---
 
+## [v1.2.2](https://github.com/DigiCatalyst-Systems/dependabot-risk/releases/tag/v1.2.2) — 2026-11-27 — v1.2.2 - route Dependabot pull requests by their branch
+
+A public workflow running this action with `ecosystem: auto` got a report in which every npm package read `could not check — PyPI returned 404 for lucide-react`. The input was passed to the analyzer unchecked, and the analyzer sends anything that is not npm to PyPI.
+
+### Fixed
+
+- **Dependabot pull requests are routed by their branch.** Dependabot names its package manager in the head branch (`dependabot/npm_and_yarn/...`, `dependabot/pip/...`, `dependabot/github_actions/...`), and that settles the registry for every package in the pull request. It now takes precedence over the `ecosystem` input and over anything read from a package name. An npm bump in the `frontend/` folder of a Python repository goes to npm without any configuration. Both `/` and `-` branch separators are read.
+
+- **Docker images are no longer mistaken for actions.** A slashed name such as `bitnami/redis` looks exactly like an action reference, so a Docker bump was analyzed as a GitHub Action and its Scope column said `CI`. The branch now names it Docker. Bundler, Cargo, Composer, Go modules, Gradle, Helm, Maven, NuGet, Terraform and the other managers this action does not cover are named the same way, instead of being sent to a registry that cannot hold them. A manager the action has never heard of falls back to the previous behaviour.
+
+- **The `ecosystem` input is validated.** It is trimmed and case-insensitive, so `PyPI` works. Any value other than `npm` or `pypi` raises one warning, and a package the pull request does not place is reported as unchecked, with a hint to set the input, rather than sent to a guessed registry. Unchecked packages count as `review`, so they never become `safe-to-automerge`.
+
+### Upgrading
+
+Workflows on `@v1` pick this up automatically. Workflows pinned to the v1.2.1 commit SHA need the new SHA: `4c78cac01fa2a28a49081514a9fc637120ec71dc`.
+
+---
+
+114 tests. Renovate pull requests, and pull requests opened by people, behave as before when `ecosystem` is `npm` or `pypi`.
+
+---
+
 ## [v1.2.1](https://github.com/DigiCatalyst-Systems/dependabot-risk/releases/tag/v1.2.1) — 2026-09-04 — name unsupported ecosystems instead of 404ing
 
 A study of 2,447 merged Dependabot pull requests across 39 repositories found that 23% of package analyses were failing. They turned out to be three separate defects wearing the same error message.
